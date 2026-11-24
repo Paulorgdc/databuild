@@ -30,7 +30,8 @@ SQL = "\n".join(m.sql for m in dbadmin.listar_migrations())
 
 TABELAS_ESPERADAS = {
     "bronze": {"carga", "obras_raw", "medicoes_raw", "categorias_raw", "servicos_raw", "valores_raw",
-               "ocorrencias_raw", "catalogo_regras_raw"},
+               "ocorrencias_raw", "catalogo_regras_raw", "arquivo", "aba", "celula_raw", "carga_arquivo",
+               "carga_log"},
     "silver": {"obra", "medicao", "item_medicao", "valor_item", "formula_item", "regra", "ocorrencia",
                "ocorrencia_causa_raiz", "log_processamento"},
     "gold": {"dim_data", "dim_obra", "dim_medicao", "dim_item", "dim_regra", "dim_classe", "dim_severidade",
@@ -246,13 +247,13 @@ class BancoSQLServer(unittest.TestCase):
         if cls.conn is not None:
             cls.conn.close()
         if getattr(cls, "criado", False):
+            dbadmin.descartar_banco(cls.cfg, cls.cfg.banco)
             for u in (cls.cfg.pipeline_user, cls.cfg.powerbi_user):
                 try:
                     with db.sessao("admin", cls.cfg, banco="master", autocommit=True) as c:
                         c.execute(f"IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = N'{u}') DROP LOGIN [{u}]")
                 except Exception:
                     pass
-            dbadmin.descartar_banco(cls.cfg, cls.cfg.banco)
 
     def q(self, sql, *params):
         return self.conn.execute(sql, *params).fetchall()
