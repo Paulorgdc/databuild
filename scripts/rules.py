@@ -1,44 +1,50 @@
-"""Detectores genéricos de erro em medições (Etapa 01).
+"""Detectores estruturais, de fórmula, de referência e de controle (Etapa 02).
+
+Cada detector devolve `model.Ocorrencia`; classe, versão e texto de sugestão vêm do
+`catalog`. A aritmética (recálculo independente, primárias x cascatas) fica em
+`recalc.py` e as regras entre medições em `compare.py`.
 
 Princípios:
 * sem regra por célula: tudo é derivado da estrutura (grupo x folha),
   das fórmulas dominantes por coluna e de identidades aritméticas;
-* as marcações em vermelho NÃO são usadas para detectar, apenas para
-  avaliar cobertura depois;
-* cada achado recebe uma classe: comprovado, suspeita ou excecao_legitima.
+* as marcações em vermelho NÃO são usadas para detectar, só para avaliar cobertura.
 """
 from __future__ import annotations
 
 import collections
 import re
-from dataclasses import dataclass, asdict
 
+import catalog
 import reader as C
+from catalog import PARAMETROS
+from model import Ocorrencia, ocorrencia_id
 
-TOL = 0.011          # tolerância de centavos (resíduo de TRUNC)
-TOL_GROUP = 0.05     # tolerância para somatórios de vários itens
+TOL = PARAMETROS["tolerancia_item"]          # resíduo de centavos (TRUNC)
+TOL_GROUP = PARAMETROS["tolerancia_grupo"]   # somatórios de vários itens
+DOM = PARAMETROS["limiar_dominante"]
 
 AGG_RANGE = re.compile(r"^=(SUM|SUBTOTAL)\((?:9,)?\$?([A-Z]+)\$?(\d+)(?::\$?([A-Z]+)\$?(\d+))?\)$")
 REF_SUM = re.compile(r"^=\$?[A-Z]+\$?\d+(?:\+\$?[A-Z]+\$?\d+)*$")
 REF_ONE = re.compile(r"\$?([A-Z]+)\$?(\d+)")
 
 
-@dataclass
-class Finding:
-    arquivo: str
-    aba: str
-    celula: str
-    codigo_item: str
-    regra: str
-    classe: str          # comprovado | suspeita | excecao_legitima
-    severidade: str      # alta | media | baixa
-    descricao: str
-    evidencia: str = ""
-    impacto: float | None = None
-    causa: str = ""      # raiz | cascata | ""
+class _Safe(dict):
+    def __missing__(self, k):
+        return "(ver evidência)"
 
-    def row(self):
-        return asdict(self)
+
+def Finding(arquivo, aba, celula, codigo_item, regra, classe, severidade, descricao,
+            evidencia="", impacto=None, causa="", campo="", esperado=None):
+    """Cria uma Ocorrencia a partir do catálogo (classe, versão, sugestão)."""
+    r = catalog.get(regra)
+    cls = classe if regra == "fórmula_ausente_ou_divergente" else r.classe  # única regra com duas classes
+    sug = r.sugestao.format_map(_Safe(celula=celula, esperado=("{:.2f}".format(esperado) if esperado is not None else "(ver evidência)")))
+    return Ocorrencia(medicao=arquivo, aba=aba, celula=celula, codigo_item=codigo_item, regra=regra, classe=cls,
+                      severidade=severidade or r.severidade, descricao=descricao, evidencia=evidencia, campo=campo,
+                      valor_esperado=esperado, diferenca=impacto, sugestao=sug,
+                      causa="cascata" if causa == "cascata" else "primaria",
+                      id=ocorrencia_id(arquivo, regra, aba, celula, campo), versao_regra=r.versao)
+
 
 
 # ---------------------------------------------------------------- geometria
@@ -336,90 +342,6 @@ def d_embedded_constants(m: C.Med, kind):
                       f"literal={list(lit)} em {len(cells)} células (ex.: {cells[:4]})", None, "")
 
 
-def d_reconcile(m: C.Med, kind, leaves_of, sections_of, lotes):
-    """Identidades aritméticas com valores armazenados + conciliação hierárquica."""
-    c = m.cols
-    H, M_, N, L, O = (c.get(k) for k in ("valor_contrato", "val_ant", "val_med", "val_ac", "saldo"))
-    F, G, K = c.get("qtd_contrato"), c.get("preco"), c.get("qtd_med")
-    # 1) folhas
-    for r, k in kind.items():
-        if k != "folha":
-            continue
-        f_, g_ = C.num(m.v(f"{F}{r}")), C.num(m.v(f"{G}{r}"))
-        if f_ is not None and g_ is not None:
-            import math
-            exp = math.trunc(f_ * g_ * 100 + 1e-9) / 100
-            if abs(val(m, H, r) - exp) > TOL:
-                yield Finding(m.label, m.ws.title, f"{H}{r}", code_at(m, r), "valor_contrato_incoerente",
-                              "comprovado", "alta", "Valor de contrato difere de quantidade x preço",
-                              f"{val(m, H, r):.2f} vs {exp:.2f}")
-        for a, b, name in ((L, (M_, N), "AC ATUAL ≠ ANTERIOR + MEDIÇÃO"), (O, None, "SALDO ≠ CONTRATO − AC ATUAL")):
-            if b:
-                d = val(m, a, r) - val(m, b[0], r) - val(m, b[1], r)
-            else:
-                d = val(m, a, r) - (val(m, H, r) - val(m, L, r))
-            if abs(d) > TOL:
-                yield Finding(m.label, m.ws.title, f"{a}{r}", code_at(m, r), "identidade_quebrada", "comprovado",
-                              "alta", name, f"diferença {d:.2f}", d)
-        # sobremedição
-        if val(m, L, r) - val(m, H, r) > TOL:
-            yield Finding(m.label, m.ws.title, f"{L}{r}", code_at(m, r), "medido_acima_do_contrato", "suspeita",
-                          "media", "Acumulado medido maior que o valor contratado do item",
-                          f"{val(m, L, r):.2f} > {val(m, H, r):.2f}", val(m, L, r) - val(m, H, r))
-        elif val(m, H, r) and val(m, L, r) and abs(val(m, O, r)) <= TOL:
-            yield Finding(m.label, m.ws.title, f"{O}{r}", code_at(m, r), "resíduo_de_truncamento",
-                          "excecao_legitima", "baixa", "Saldo de centavos por TRUNC em item 100% medido",
-                          f"saldo {val(m, O, r):.2f}")
-    # 2) grupos: verdade = soma das folhas
-    truth_cols = [x for x in (H, M_, N) if x]
-    diffs: dict[tuple[int, str], float] = {}
-    for r in sorted([r for r, k in kind.items() if k in ("secao", "lote")], reverse=True):
-        leaves = leaves_of[r]
-        for col in truth_cols:
-            truth = sum(val(m, col, x) for x in leaves)
-            diffs[(r, col)] = val(m, col, r) - truth
-        diffs[(r, L)] = val(m, L, r) - sum(val(m, M_, x) + val(m, N, x) for x in leaves)
-        diffs[(r, O)] = val(m, O, r) - sum(val(m, H, x) - val(m, L, x) for x in leaves)
-    for r in sorted({k[0] for k in diffs}):
-        children = sections_of.get(r, []) if kind[r] == "lote" else []
-        for col in truth_cols + [L, O]:
-            d = diffs[(r, col)]
-            if abs(d) <= TOL_GROUP:
-                continue
-            if col == L:      # L = M + N: deriva das duas colunas
-                own = d - diffs.get((r, M_), 0.0) - diffs.get((r, N), 0.0)
-            elif col == O:    # O = H - L: deriva de L
-                own = d + diffs.get((r, L), 0.0)
-            else:
-                own = d - sum(diffs.get((ch, col), 0.0) for ch in children)
-            causa = "raiz" if abs(own) > TOL_GROUP else "cascata"
-            yield Finding(m.label, m.ws.title, f"{col}{r}", code_at(m, r), "divergência_financeira_agregada",
-                          "comprovado", "alta" if causa == "raiz" else "media",
-                          "Valor do grupo difere da soma dos itens (valores armazenados)",
-                          f"grupo−itens={d:.2f}; parte própria={own:.2f}", d, causa)
-    # 3) total geral
-    if m.total_row:
-        for col in truth_cols + [L, O]:
-            parts = [val(m, col, r) for r in lotes]
-            d = val(m, col, m.total_row) - sum(parts)
-            if abs(d) > TOL_GROUP:
-                yield Finding(m.label, m.ws.title, f"{col}{m.total_row}", "TOTAL",
-                              "divergência_financeira_agregada", "comprovado", "alta",
-                              "Total da obra difere da soma dos lotes", f"{d:.2f}", d, "raiz")
-        leaf_total = {col: sum(val(m, col, r) for r, k in kind.items() if k == "folha") for col in truth_cols}
-        for col, t in leaf_total.items():
-            d = val(m, col, m.total_row) - t
-            if abs(d) > TOL_GROUP:
-                yield Finding(m.label, m.ws.title, f"{col}{m.total_row}", "TOTAL", "total_vs_soma_das_folhas",
-                              "comprovado", "alta", "Total da obra difere da soma de todos os itens (folhas)",
-                              f"{d:.2f}", d, "cascata")
-        if val(m, L, m.total_row) - val(m, H, m.total_row) > TOL:
-            yield Finding(m.label, m.ws.title, f"{L}{m.total_row}", "TOTAL", "medido_acima_do_contrato",
-                          "suspeita", "alta", "Acumulado medido da obra maior que o valor total contratado",
-                          f"{val(m, L, m.total_row):.2f} > {val(m, H, m.total_row):.2f}",
-                          val(m, L, m.total_row) - val(m, H, m.total_row))
-
-
 def d_group_constants(m: C.Med, kind):
     """Colunas de entrada (M) em grupos digitadas à mão: info para o relatório."""
     M_ = m.cols.get("val_ant")
@@ -571,7 +493,6 @@ def run_all(m: C.Med):
     for gen in (d_error_tokens(m), d_hidden_dependencies(m),
                 d_aggregation(m, kind, leaves_of, sections_of, lotes),
                 d_templates(m, kind), d_missing_inputs(m, kind), d_embedded_constants(m, kind),
-                d_reconcile(m, kind, leaves_of, sections_of, lotes),
                 d_group_constants(m, kind), d_repeated_codes(m, kind),
                 d_financial_control(m, kind), d_total_row(m, kind)):
         out.extend(gen)

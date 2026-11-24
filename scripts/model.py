@@ -7,6 +7,7 @@ estáveis, prontos para carga futura em SQL Server (camada Bronze/Silver).
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field, asdict
 
 # Campos lógicos de valor de uma linha de medição.
@@ -19,6 +20,12 @@ TIPOS = ("folha", "secao", "lote", "total")  # serviço, categoria, categoria-ra
 CLASSES = ("comprovado", "suspeita", "excecao_legitima", "depende_validacao_contratual")
 SEVERIDADES = ("baixa", "media", "alta", "critica")
 TOTAL = "TOTAL"
+
+
+def ocorrencia_id(medicao: str, regra: str, aba: str, celula: str, campo: str = "") -> str:
+    """Id determinístico: o mesmo achado na mesma planilha gera sempre o mesmo id."""
+    h = hashlib.sha1("|".join((medicao, regra, aba, celula, campo)).encode("utf-8")).hexdigest()
+    return "OC-" + h[:10]
 
 
 @dataclass

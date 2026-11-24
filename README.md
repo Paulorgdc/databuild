@@ -18,13 +18,19 @@ Monthly measurements of a construction job are kept in Excel workbooks full of h
 
 | What | Where |
 |---|---|
-| Structural inventory of the six monthly measurements | `scripts/01_inventory.py` |
-| Workbook reader and generic error detectors | `scripts/reader.py`, `scripts/rules.py`, `scripts/02_diagnose.py` |
-| Standard data model and versioned rule catalog (foundation of the Stage 02 audit engine, in progress) | `scripts/model.py`, `scripts/catalog.py` |
-| Cross-measurement comparison | `scripts/03_compare.py` |
+| Structural inventory of the six monthly measurements (Stage 01) | `scripts/01_inventory.py` |
+| Workbook reader | `scripts/reader.py` |
+| Standard data model and versioned rule catalog (34 rules, v2.0.0) | `scripts/model.py`, `scripts/catalog.py` |
+| Spreadsheet-to-model builder | `scripts/build.py` |
+| Structural, formula, reference and control detectors | `scripts/rules.py` |
+| Independent recalculation, primary errors versus cascades | `scripts/recalc.py` |
+| Cross-measurement consistency rules | `scripts/compare.py` |
+| Validation engine (severity by impact, financial impact counted once) | `scripts/engine.py` |
+| Structured export (CSV and JSON, schema, catalog) | `scripts/export.py` |
+| Command-line interface (`audit`, `catalog`, `baseline`) | `scripts/audit.py` |
+| Comparison against the Stage 01 baseline | `scripts/baseline.py` |
 | AI viability experiment (complement, not primary detector) | `scripts/04_ai_viability.py` |
-| Local diagnostic report | `scripts/05_report.py` (writes to `outputs/`) |
-| Detector tests (unit and random-mutation) | `tests/` (tests only) |
+| Unit, integration and mutation tests | `tests/` (tests only) |
 
 The repository is public, but the code is proprietary. Workbooks (`data/`, ignored entirely), derived results (`outputs/`) and extension records (`reference/`) are kept locally and are never versioned. The company is identified publicly only as **Construtora Horizontes**.
 
@@ -33,10 +39,17 @@ The repository is public, but the code is proprietary. Workbooks (`data/`, ignor
 ## Features
 
 - Row classification by geometry (group, section, leaf item, total) instead of code prefixes.
-- Detection of incomplete sums and subtotals, missing or typed-over formulas, formula errors, broken or wrong links, and broken arithmetic identities.
-- Root-cause versus cascade attribution of financial divergences.
-- Comparison across measurements: removed items, contract drift and accumulated continuity.
-- Mutation tests that inject errors into random cells of a temporary copy and check that the detectors flag exactly those cells.
+- **Independent recalculation** from the primary inputs (quantity, unit price, measured quantity, previous accumulated), compared with both the stored values and the local identities.
+- **Primary errors versus cascades**: a cell that breaks its own identity is a primary error; a cell that only inherits an upstream error is a cascade, linked to its root cause. Only primary errors carry financial impact, so the same money is never counted twice.
+- Detection of incomplete sums and subtotals, missing or typed-over formulas, formula errors, broken or wrong links.
+- **Cross-measurement rules**: removed or added services, changed registration data, accumulated-value continuity.
+- Four classes: proven error, suspicion, legitimate exception and *depends on contract validation* (scope changes are flagged, never asserted as errors).
+- Structured export (CSV and JSON) with a stable schema ready for a future SQL Server load.
+- Unit, integration and mutation tests (random error injection, row shifting, service removal and insertion).
+
+### Stage 02 results on the six measurements
+
+306 occurrences: 202 proven (111 primary errors and 91 cascades), 47 suspicions, 40 legitimate exceptions and 17 that depend on contract validation. All 15 reviewer red marks are covered. Compared with the Stage 01 baseline (306 findings, 149 proven), the engine drops 75 zero-balance truncation residues and adds 42 cascades, 5 continuity breaks and 12 removed-service flags. Details stay in local, ignored outputs.
 
 ---
 
@@ -73,15 +86,14 @@ Defined for the next stages; **none of it is implemented yet**.
 ```bash
 pip install -r requirements.txt
 # copy the six MED *.xlsx workbooks into data/ (local only, entirely ignored by Git)
-python scripts/01_inventory.py
-python scripts/02_diagnose.py
-python scripts/03_compare.py
-python scripts/04_ai_viability.py
-python scripts/05_report.py
+python scripts/audit.py audit                 # audits data/MED *.xlsx -> outputs/etapa02/
+python scripts/audit.py audit MED_A.xlsx MED_B.xlsx --out my_folder --format csv,json
+python scripts/audit.py catalog --out catalogo.json
+python scripts/audit.py baseline              # compares with the Stage 01 baseline
 python -m unittest discover -s tests -v
 ```
 
-Scripts only read `data/`; every result goes to `outputs/`. Both folders are ignored by Git and must never be committed.
+Scripts only read `data/`; every result goes to `outputs/`. Both folders are ignored by Git and must never be committed. The Stage 01 scripts (`02_diagnose`, `03_compare`, `05_report`) were replaced by the engine and remain in the `etapa-01` git tag.
 
 ---
 

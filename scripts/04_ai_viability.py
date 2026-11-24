@@ -49,7 +49,7 @@ def main():
     X = np.vstack(X)
     # verdade-terreno: achados comprovados que apontam para uma folha (arquivo, código)
     pos = set()
-    with open(C.OUT / "findings.csv", encoding="utf-8-sig") as fh:
+    with open(C.OUT / "baseline_etapa01" / "findings.csv", encoding="utf-8-sig") as fh:
         for f in csv.DictReader(fh):
             if f["classe"] == "comprovado" and f["codigo_item"] and f["codigo_item"] != "TOTAL" \
                and f["regra"] in ("fórmula_ausente_ou_divergente", "folha_com_somatório", "identidade_quebrada",
@@ -57,7 +57,7 @@ def main():
                 pos.add((f["arquivo"], f["codigo_item"]))
     pos |= {(m, c) for (m, c, _) in K if False}
     # entradas ausentes (suspeita forte) também entram como positivas
-    with open(C.OUT / "findings.csv", encoding="utf-8-sig") as fh:
+    with open(C.OUT / "baseline_etapa01" / "findings.csv", encoding="utf-8-sig") as fh:
         for f in csv.DictReader(fh):
             if f["regra"] == "entrada_ausente":
                 pos.add((f["arquivo"], f["codigo_item"]))
@@ -88,7 +88,7 @@ def main():
     lines.append(f"- linha de base aleatória top-{2 * npos}: recall≈{base:.0%}")
     # cobertura estrutural: quantos achados comprovados são sequer representáveis como característica de linha?
     tot = leaf = 0
-    with open(C.OUT / "findings.csv", encoding="utf-8-sig") as fh:
+    with open(C.OUT / "baseline_etapa01" / "findings.csv", encoding="utf-8-sig") as fh:
         for f in csv.DictReader(fh):
             if f["classe"] == "comprovado":
                 tot += 1
