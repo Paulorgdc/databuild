@@ -30,7 +30,11 @@ Monthly measurements of a construction job are kept in Excel workbooks full of h
 | Command-line interface (`audit`, `catalog`, `baseline`) | `scripts/audit.py` |
 | Comparison against the Stage 01 baseline | `scripts/baseline.py` |
 | AI viability experiment (complement, not primary detector) | `scripts/04_ai_viability.py` |
-| Unit, integration and mutation tests | `tests/` (tests only) |
+| SQL Server schema: versioned migrations (`bronze`, `silver`, `gold`, roles) | `database/migrations/` |
+| Local SQL Server installer (admin, one time) | `database/setup/install_local_sqlserver.ps1` |
+| Connection layer (pyodbc, SQLAlchemy/Pandas, JDBC/Spark, Airflow URIs) | `scripts/db.py` |
+| Database administration CLI (`init-env`, `migrate`, `provision`, `check`, `status`) | `scripts/dbadmin.py` |
+| Unit, integration, mutation and live SQL Server tests | `tests/` (tests only) |
 
 The repository is public, but the code is proprietary. Workbooks (`data/`, ignored entirely), derived results (`outputs/`) and extension records (`reference/`) are kept locally and are never versioned. The company is identified publicly only as **Construtora Horizontes**.
 
@@ -53,15 +57,36 @@ The repository is public, but the code is proprietary. Workbooks (`data/`, ignor
 
 ---
 
+## Stage 03: SQL Server infrastructure and modeling
+
+SQL Server 2022 Express (free, local, fixed port 1433) hosts the `databuild` database with three schemas:
+
+- **bronze**: raw text landing tables plus `carga` (load batch, the lineage root).
+- **silver**: typed, validated tables (works, measurements, items, values, formulas, rules, occurrences, primary-cause links) with composite foreign keys, so an item always belongs to its measurement, a cascade always points to a primary error, and only primary errors carry financial impact. Money is `DECIMAL(18,2)` or `(18,4)`, never floating point.
+- **gold**: star schema for Power BI: dimensions (date, work, measurement, item, rule, class, severity, cause), facts (item value, measurement, occurrence) and a cascade-to-primary bridge. Unknown members use key -1. `gold.usp_carregar_gold` loads it from Silver, transactionally and idempotently.
+
+Two database roles: `rl_databuild_pipeline` (reads and writes the three schemas) and `rl_databuild_powerbi_reader` (reads `gold` only; `bronze` and `silver` are denied). Migrations are idempotent, tracked by SHA-256 in `dbo.schema_migration`, and an altered applied migration is rejected. Credentials live only in the git-ignored `.env.local`; `.env.example` documents the variable names. Tests use synthetic data only and run against a real server (and skip when none is available).
+
+```bash
+# once, from an elevated PowerShell: installs SQL Server 2022 Express and ODBC Driver 18
+powershell -ExecutionPolicy Bypass -File database/setup/install_local_sqlserver.ps1
+python scripts/dbadmin.py init-env      # creates .env.local with generated passwords
+python scripts/dbadmin.py migrate       # applies database/migrations/*.sql
+python scripts/dbadmin.py provision     # creates the pipeline and Power BI logins
+python scripts/dbadmin.py check         # connects with each role and verifies permissions
+```
+
+---
+
 ## Target Architecture
 
-Defined for the next stages; **none of it is implemented yet**.
+Stages 01 to 03 are delivered (extraction diagnostics, validation engine, SQL Server schema). Ingestion, PySpark, Airflow, Power BI and the web application are **not implemented yet**.
 
 | Layer | Role |
 |---|---|
 | Excel | Original source |
 | Python, openpyxl, Pandas | Extraction |
-| SQL Server | Storage |
+| SQL Server | Storage (schema and roles delivered in Stage 03, empty of real data) |
 | Bronze | Raw data |
 | Silver | Treatment and validation |
 | PySpark | Processing and business rules |
@@ -78,6 +103,7 @@ Defined for the next stages; **none of it is implemented yet**.
 - **Workbook reading:** openpyxl
 - **Consolidation:** Pandas
 - **AI viability experiment:** scikit-learn
+- **Database:** SQL Server 2022 Express, pyodbc, SQLAlchemy
 
 ---
 
