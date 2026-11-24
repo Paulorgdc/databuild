@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import csv
 
-import common as C
-import detectors as D
+import reader as C
+import rules as D
 
 TOL = 0.011
 

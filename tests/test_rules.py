@@ -18,8 +18,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-import common as C  # noqa: E402
-import detectors as D  # noqa: E402
+import reader as C  # noqa: E402
+import rules as D  # noqa: E402
 
 
 class UnitTests(unittest.TestCase):

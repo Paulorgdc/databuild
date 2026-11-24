@@ -1,6 +1,5 @@
-# Dados e documentos confidenciais: nunca versionar, nem em repositório privado
-data/*
-!data/README.md
+# Dados e documentos confidenciais: nunca versionar (repositório público; sem exceções)
+/data/
 # dashboard/ recebe o futuro Power BI; só a pasta é versionada
 dashboard/*
 !dashboard/.gitkeep

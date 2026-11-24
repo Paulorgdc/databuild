@@ -13,7 +13,7 @@ import collections
 import re
 from dataclasses import dataclass, asdict
 
-import common as C
+import reader as C
 
 TOL = 0.011          # tolerância de centavos (resíduo de TRUNC)
 TOL_GROUP = 0.05     # tolerância para somatórios de vários itens

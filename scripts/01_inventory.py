@@ -12,7 +12,7 @@ import collections
 import csv
 import json
 
-import common as C
+import reader as C
 
 
 def used_range(ws):

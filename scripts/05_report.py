@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-import common as C
+import reader as C
 
 def md_table(df: pd.DataFrame) -> str:
     cols = list(df.columns)

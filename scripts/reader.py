@@ -1,8 +1,8 @@
-"""Utilitários compartilhados do diagnóstico (Etapa 01).
+"""Leitura de medições Excel (Etapa 01, evoluída na Etapa 02).
 
 Nada aqui conhece células específicas: a estrutura é descoberta pelos
-cabeçalhos e pelos códigos hierárquicos de item (A, A.1, A.1.1.1 ...).
-As medições originais em data/ são abertos somente para leitura.
+cabeçalhos, pelo conteúdo das colunas e pelos códigos hierárquicos de item
+(A, A.1, A.1.1.1 ...). As medições originais são abertas somente para leitura.
 """
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ warnings.filterwarnings("ignore", message="Cannot parse header or footer")
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
 OUT = ROOT / "outputs"
+MED_GLOB = "MED *.xlsx"
 
 MAIN_SHEET = "Resumo Medição"
 FIN_SHEET = "03-CONTROLE FINANCEIRO"
@@ -32,8 +33,8 @@ def label_of(path: Path) -> str:
     return m.group(1) if m else path.stem
 
 
-def med_files() -> list[Path]:
-    return sorted(DATA.glob("MED *.xlsx"))
+def med_files(folder: Path | None = None) -> list[Path]:
+    return sorted((folder or DATA).glob(MED_GLOB))
 
 
 def is_formula(v) -> bool:
@@ -183,7 +184,96 @@ def load(path: Path) -> Med:
             break
     last = total_row - 1 if total_row else 400
     items = build_items(ws, cols.get("item", "A"), first_row, last)
+    cols.update(find_text_columns(ws, cols, items))
     return Med(path, label_of(path), wb, wv, ws, wsv, cols, items, first_row, total_row)
+
+
+def find_text_columns(ws, cols: dict, items: dict[str, "Item"]) -> dict[str, str]:
+    """Descobre pelo conteúdo as colunas de código de serviço, fonte e descrição
+    (folhas: texto entre o código do item e a unidade)."""
+    item_ci = column_index_from_string(cols.get("item", "A"))
+    unid_ci = column_index_from_string(cols.get("unid", "E"))
+    leaves = [it.row for it in items.values() if not it.children]
+    stats = {}
+    for ci in range(item_ci + 1, unid_ci):
+        vals = [ws.cell(r, ci).value for r in leaves]
+        vals = [str(v).strip() for v in vals if v not in (None, "")]
+        if not vals:
+            continue
+        stats[ci] = (sum(len(v) for v in vals) / len(vals), sum(v.isdigit() for v in vals) / len(vals))
+    out = {}
+    if stats:
+        desc = max(stats, key=lambda c: stats[c][0])
+        out["desc"] = get_column_letter(desc)
+        digits = [c for c in stats if c != desc and stats[c][1] >= 0.6]
+        if digits:
+            out["servico"] = get_column_letter(digits[0])
+        rest = [c for c in stats if c != desc and get_column_letter(c) != out.get("servico")]
+        if rest:
+            out["fonte"] = get_column_letter(rest[0])
+    return out
+
+
+_MED_ROW = re.compile(r"^\s*\d+\s*\S*\s*medi", re.I)
+_LINK = re.compile(r"^='?(\[\d+\])?([^'!]+)'?!\$?([A-Z]+)\$?(\d+)$")
+
+
+def find_fin_layout(wb) -> dict | None:
+    """Localiza no controle financeiro as linhas de medição e suas colunas
+    (rótulo, período, valor ligado ao resumo, acumulado, prazo, contrato)."""
+    if FIN_SHEET not in wb.sheetnames:
+        return None
+    ws = wb[FIN_SHEET]
+    label_hits = collections_counter()
+    for row in ws.iter_rows():
+        for c in row:
+            if isinstance(c.value, str) and _MED_ROW.match(c.value):
+                label_hits[c.column] += 1
+    if not label_hits:
+        return None
+    lc = label_hits.most_common(1)[0][0]
+    rows = [r for r in range(1, ws.max_row + 1)
+            if isinstance(ws.cell(r, lc).value, str) and _MED_ROW.match(ws.cell(r, lc).value)]
+    date_cols = [c for c in range(1, ws.max_column + 1)
+                 if sum(hasattr(ws.cell(r, c).value, "year") for r in rows) >= max(1, len(rows) // 2)]
+    link_hits = collections_counter()
+    for r in rows:
+        for c in range(1, ws.max_column + 1):
+            v = ws.cell(r, c).value
+            if isinstance(v, str) and _LINK.match(v) or (isinstance(v, str) and "Resumo" in v):
+                link_hits[c] += 1
+    vc = link_hits.most_common(1)[0][0] if link_hits else None
+    acc = None
+    if vc:
+        for c in (vc + 1, vc + 2):
+            for r in range(max(1, rows[0] - 4), rows[0]):
+                if isinstance(ws.cell(r, c).value, str) and "ACUMUL" in ws.cell(r, c).value.upper():
+                    acc = c
+        acc = acc or vc + 1
+    prazo = None
+    for r in range(max(1, rows[0] - 4), rows[0]):
+        for c in range(1, ws.max_column + 1):
+            if isinstance(ws.cell(r, c).value, str) and "PRAZO" in ws.cell(r, c).value.upper():
+                prazo = c
+    contrato = None
+    for r in range(1, rows[0]):
+        for c in range(1, ws.max_column + 1):
+            v = ws.cell(r, c).value
+            if isinstance(v, str) and "VALOR CONTR" in v.upper():
+                for rr in range(r + 1, min(r + 3, rows[0])):
+                    if isinstance(ws.cell(rr, c).value, (int, float)):
+                        contrato = (rr, c)
+    L = get_column_letter
+    return {"rows": rows, "label": L(lc), "ini": L(date_cols[0]) if date_cols else None,
+            "fim": L(date_cols[1]) if len(date_cols) > 1 else None,
+            "valor": L(vc) if vc else None, "acum": L(acc) if acc else None,
+            "prazo": L(prazo) if prazo else None,
+            "contrato": f"{L(contrato[1])}{contrato[0]}" if contrato else None}
+
+
+def collections_counter():
+    import collections
+    return collections.Counter()
 
 
 def num(v):

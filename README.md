@@ -19,13 +19,14 @@ Monthly measurements of a construction job are kept in Excel workbooks full of h
 | What | Where |
 |---|---|
 | Structural inventory of the six monthly measurements | `scripts/01_inventory.py` |
-| Generic error detectors and diagnosis | `scripts/detectors.py`, `scripts/02_diagnose.py` |
+| Workbook reader and generic error detectors | `scripts/reader.py`, `scripts/rules.py`, `scripts/02_diagnose.py` |
+| Standard data model and versioned rule catalog (foundation of the Stage 02 audit engine, in progress) | `scripts/model.py`, `scripts/catalog.py` |
 | Cross-measurement comparison | `scripts/03_compare.py` |
 | AI viability experiment (complement, not primary detector) | `scripts/04_ai_viability.py` |
 | Local diagnostic report | `scripts/05_report.py` (writes to `outputs/`) |
-| Detector tests (unit and random-mutation) | `tests/` |
+| Detector tests (unit and random-mutation) | `tests/` (tests only) |
 
-Workbooks, derived results and extension records (partnership annex, field logbook and photos in `reference/`) are kept locally and are not versioned.
+The repository is public, but the code is proprietary. Workbooks (`data/`, ignored entirely), derived results (`outputs/`) and extension records (`reference/`) are kept locally and are never versioned. The company is identified publicly only as **Construtora Horizontes**.
 
 ---
 
@@ -71,7 +72,7 @@ Defined for the next stages; **none of it is implemented yet**.
 
 ```bash
 pip install -r requirements.txt
-# copy the six MED *.xlsx workbooks into data/ (not versioned)
+# copy the six MED *.xlsx workbooks into data/ (local only, entirely ignored by Git)
 python scripts/01_inventory.py
 python scripts/02_diagnose.py
 python scripts/03_compare.py
@@ -80,10 +81,10 @@ python scripts/05_report.py
 python -m unittest discover -s tests -v
 ```
 
-Scripts only read `data/`; every result goes to `outputs/`, which Git ignores. See `data/README.md` for the data policy.
+Scripts only read `data/`; every result goes to `outputs/`. Both folders are ignored by Git and must never be committed.
 
 ---
 
 ## License
 
-Proprietary. All rights reserved (see `LICENSE`). This is a deliberate exception to the academic MIT standard: the repository is private and its code is not open for reuse.
+Proprietary. All rights reserved (see `LICENSE`). The repository is public for visibility only; the license is a deliberate exception to the academic MIT standard and the code is not open for reuse.

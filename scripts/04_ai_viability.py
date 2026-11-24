@@ -15,8 +15,8 @@ import csv
 import numpy as np
 from sklearn.ensemble import IsolationForest
 
-import common as C
-import detectors as D
+import reader as C
+import rules as D
 
 
 def features(m: C.Med):
