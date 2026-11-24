@@ -1,0 +1,32 @@
+# Dados e documentos confidenciais: nunca versionar, nem em repositório privado
+data/*
+!data/README.md
+# dashboard/ recebe o futuro Power BI; só a pasta é versionada
+dashboard/*
+!dashboard/.gitkeep
+# anexos de extensão, fotos de campo e referências com dados pessoais
+reference/
+*.xlsx
+*.xlsm
+*.xls
+*.xlsb
+*.csv
+*.pbix
+*.pbit
+~$*
+
+# Saídas derivadas dos dados reais (valores, itens e células da empresa)
+outputs/
+
+# Ambiente local
+.env
+.env.local
+.runtime/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
