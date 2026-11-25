@@ -262,14 +262,7 @@ def _publicar(conn, run_id, res, fontes, n_valores):
 @contextmanager
 def _bloqueio(cfg):
     with db.sessao("pipeline", cfg, autocommit=True) as controle:
-        lock = controle.execute("""
-            SET NOCOUNT ON;
-            DECLARE @rc INT;
-            EXEC @rc = sp_getapplock @Resource = N'DataBuild.Silver', @LockMode = N'Exclusive',
-                @LockOwner = N'Session', @LockTimeout = 0;
-            SELECT @rc;
-        """).fetchone()[0]
-        if lock < 0:
+        if not db.travar_sequencia(controle, "Exclusive", "Session", 0):
             raise ErroSilver("Já existe uma promoção Silver em execução.")
         try:
             yield controle
@@ -280,6 +273,11 @@ def _bloqueio(cfg):
 def promover(spark, cfg):
     """Publica uma versão completa e imutável da sequência de medições."""
     with _bloqueio(cfg) as controle:
+        # Uma tentativa ainda aberta com a trava livre perdeu o processo que a iniciou.
+        controle.execute("""
+            UPDATE silver.execucao SET status = N'falhou', erro_tipo = N'ExecucaoInterrompida',
+                finalizada_em = SYSUTCDATETIME() WHERE status = N'iniciada'
+        """)
         arquivos = silver_source.manifesto(controle)
         _validar_arquivos(arquivos)
         manifesto = _id_manifesto(arquivos)

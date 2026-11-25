@@ -194,8 +194,18 @@ def conectar(papel: str = "pipeline", config: Config | None = None, banco: str |
     cfg = config or Config.do_ambiente()
     if cfg.driver not in pyodbc.drivers():
         raise RuntimeError(f"driver ODBC {cfg.driver!r} não instalado (instalados: {drivers_odbc() or 'nenhum'}). "
-                           "Rode database/setup/install_local_sqlserver.ps1 como administrador.")
+                           "Use database/setup/install_local_sqlserver.ps1 no Windows ou airflow/install-ubuntu.sh no Ubuntu.")
     return pyodbc.connect(cfg.odbc(papel, banco), autocommit=autocommit, timeout=timeout)
+
+
+def travar_sequencia(conn, modo: str, dono: str, timeout_ms: int) -> bool:
+    """Coordena mudanças no manifesto Bronze com promoção Silver e publicação Gold."""
+    return conn.execute("""
+        DECLARE @rc INT;
+        EXEC @rc = sp_getapplock @Resource = N'DataBuild.Silver', @LockMode = ?,
+            @LockOwner = ?, @LockTimeout = ?;
+        SELECT @rc;
+    """, modo, dono, timeout_ms).fetchone()[0] >= 0
 
 
 @contextmanager

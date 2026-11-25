@@ -217,9 +217,10 @@ _TABELA = {k: f"bronze.{k}_raw" for k in _COLS}
 class Ingestor:
     """Executa a ingestão numa conexão do papel `pipeline`. `log` recebe mensagens legíveis."""
 
-    def __init__(self, conn, log=print):
+    def __init__(self, conn, log=print, sequencia_bloqueada=False):
         self.conn = conn
         self.log = log
+        self.sequencia_bloqueada = sequencia_bloqueada
         self.carga_id: int | None = None
 
     # --- lote ---------------------------------------------------------------------------------
@@ -284,6 +285,8 @@ class Ingestor:
                     "sha256": ex.sha256}
 
     def _gravar(self, ex: Extracao, ini) -> dict:
+        if not self.sequencia_bloqueada and not db.travar_sequencia(self.conn, "Shared", "Transaction", 60000):
+            raise RuntimeError("outra operação está processando a sequência de medições")
         cur = self.conn.cursor()
         # Serializa ingestões concorrentes do mesmo conteúdo e confere duplicidade dentro da transação.
         cur.execute("SET NOCOUNT ON; DECLARE @r INT; EXEC @r = sp_getapplock @Resource = ?, @LockMode = 'Exclusive', "
@@ -299,6 +302,8 @@ class Ingestor:
             return {"arquivo": ex.nome, "rotulo": ex.rotulo, "resultado": "duplicado", "sha256": ex.sha256,
                     "arquivo_id": existente}
 
+        if cur.execute("SELECT TOP (1) 1 FROM silver.medicao").fetchone():
+            raise RuntimeError("a sequência Silver está selada, use um banco candidato para novos conteúdos")
         homonimo = cur.execute("SELECT COUNT(*) FROM bronze.arquivo WHERE nome_arquivo = ?", ex.nome).fetchone()[0]
         cur.execute("INSERT INTO bronze.arquivo (sha256, nome_arquivo, tamanho_bytes, modificado_origem, medicao_id, "
                     "n_abas, n_celulas, n_formulas, n_erros, primeira_carga_id) OUTPUT INSERTED.arquivo_id "
@@ -319,15 +324,16 @@ class Ingestor:
             aba_id = int(cur.fetchone()[0])
             self._celulas(cur, arquivo_id, aba_id, a)
         n_est = self._estruturado(cur, arquivo_id, ex)
-        self.conn.commit()   # único ponto de confirmação do arquivo: tudo ou nada
         aviso = ""
         if homonimo:
             aviso = " (mesmo nome de um arquivo anterior, conteúdo diferente: nova versão preservada)"
+        # O recibo e os registros brutos confirmam juntos, inclusive se o processo parar após o commit.
+        self._registrar("carregado", ex, ex.nome, arquivo_id, aviso.strip() or None, ini)
+        if homonimo:
             self._log("aviso", f"{ex.rotulo}: {aviso.strip()}", ex.sha256)
         self._log("info", f"{ex.rotulo}: carregado (arquivo_id {arquivo_id}): {len(ex.abas)} abas, {ex.n_celulas} "
                           f"células, {ex.n_formulas} fórmulas, {ex.n_erros} erros, {n_est} registros estruturados",
                   ex.sha256)
-        self._registrar("carregado", ex, ex.nome, arquivo_id, aviso.strip() or None, ini)
         return {"arquivo": ex.nome, "rotulo": ex.rotulo, "resultado": "carregado", "sha256": ex.sha256,
                 "arquivo_id": arquivo_id, "abas": len(ex.abas), "celulas": ex.n_celulas, "formulas": ex.n_formulas,
                 "erros": ex.n_erros, "estruturados": n_est}
@@ -373,16 +379,17 @@ class Ingestor:
 def ingerir_lote(arquivos: list[Path], cfg: db.Config | None = None, log=print, origem: str = "batch") -> dict:
     """Uma carga (lote) para todos os arquivos. Retorna o resumo; `ok` é falso se algum arquivo falhou."""
     cfg = cfg or db.Config.do_ambiente()
-    resultados: list[dict] = []
     with db.sessao("pipeline", cfg) as conn:
-        ing = Ingestor(conn, log)
-        carga = ing.abrir_carga(f"{origem}: {len(arquivos)} arquivo(s)")
-        for p in arquivos:
-            resultados.append(ing.ingerir(p))
-        cont = {r: sum(1 for x in resultados if x["resultado"] == r) for r in ("carregado", "duplicado", "falhou")}
-        status = "falhou" if cont["falhou"] else "concluida"
-        ing.fechar_carga(status, f"{cont['carregado']} carregado(s), {cont['duplicado']} duplicado(s), "
-                                 f"{cont['falhou']} falha(s)")
+        return gravar_lote(Ingestor(conn, log), arquivos, origem)
+
+
+def gravar_lote(ing: Ingestor, arquivos: list[Path], origem: str) -> dict:
+    carga = ing.abrir_carga(f"{origem}: {len(arquivos)} arquivo(s)")
+    resultados = [ing.ingerir(p) for p in arquivos]
+    cont = {r: sum(1 for x in resultados if x["resultado"] == r) for r in ("carregado", "duplicado", "falhou")}
+    status = "falhou" if cont["falhou"] else "concluida"
+    ing.fechar_carga(status, f"{cont['carregado']} carregado(s), {cont['duplicado']} duplicado(s), "
+                     f"{cont['falhou']} falha(s)")
     return {"carga_id": carga, "status": status, "ok": not cont["falhou"], **cont, "arquivos": resultados}
 
 

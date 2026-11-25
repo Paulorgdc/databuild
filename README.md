@@ -37,6 +37,7 @@ Monthly measurements of a construction job are kept in Excel workbooks full of h
 | Bronze workbook ingestion, load history and integrity verification (Stage 04) | `database/migrations/009_bronze_ingestao.sql`, `scripts/ingest.py` |
 | Silver promotion, validation and Bronze lineage (Stage 05) | `database/migrations/010_silver_processamento.sql`, `011_silver_indices.sql`, `scripts/silver.py` |
 | Gold publication, measurement indicators and reconciliation (Stage 06) | `database/migrations/012_gold_publicacao.sql`, `scripts/gold.py` |
+| Airflow DAG, Ubuntu setup and incremental intake (Stage 07) | `airflow/`, `scripts/orquestrar.py` |
 | Unit, integration, mutation and live SQL Server tests | `tests/` (tests only) |
 
 The repository is public, but the code is proprietary. Workbooks (`data/`, ignored entirely), derived results (`outputs/`) and extension records (`reference/`) are kept locally and are never versioned. The company is identified publicly only as **Construtora Horizontes**.
@@ -148,9 +149,58 @@ The local publication reconciled six measurements, 720 item facts, 306 findings,
 
 ---
 
+## Stage 07: Airflow orchestration
+
+`databuild_pipeline` runs discovery, incremental Bronze ingestion, Silver promotion, Silver audit, Gold publication and Gold reconciliation in that order. The Gold tasks use the exact Silver execution from the same run. Temporary failures get two automatic retries with backoff. A conflicting revision fails discovery and leaves downstream work blocked. Airflow allows one run and one task at a time for this DAG. SQL Server locks coordinate changes to the Bronze manifest with Silver promotion and Gold publication.
+
+### Run locally
+
+Use WSL 2 with Ubuntu 24.04, Python 3.12, Java 17 and ODBC 18. The installer sets up separate virtual environments for Airflow 3.4.0 and PySpark 4.3.0. PostgreSQL 16 keeps Airflow metadata in the dedicated `databuild_airflow` database. Airflow accesses it through a local Unix socket using peer authentication. The pipeline uses the existing `.env.local` through the Windows mount and Microsoft JDBC 13.6.0 for Spark. Run these commands from the project folder in PowerShell.
+
+```powershell
+wsl --list --verbose
+# Install Ubuntu if it is absent. Restart Windows if the WSL installer requests it.
+wsl --install -d Ubuntu-24.04 --no-launch --web-download
+wsl -d Ubuntu-24.04 -u root --exec bash ./airflow/install-ubuntu.sh
+wsl -d Ubuntu-24.04 -u databuild_airflow --exec bash ./airflow/install.sh
+wsl -d Ubuntu-24.04 -u databuild_airflow
+```
+
+In Ubuntu, use the Windows host address from the default route when WSL is in NAT mode and SQL Server listens on TCP 1433. With mirrored networking, use IPv4 loopback or the address already set in `.env.local`. If PostgreSQL is stopped after a WSL restart, run `wsl -d Ubuntu-24.04 -u root --exec /usr/sbin/service postgresql start` from PowerShell.
+
+```bash
+# In NAT mode, set this before starting the Airflow services.
+export DATABUILD_SQL_HOST="$(ip -4 route show default | awk 'NR==1 { print $3 }')"
+source ./airflow/env.sh
+airflow db check
+airflow standalone >>"$AIRFLOW_HOME/standalone.log" 2>&1
+```
+
+Airflow listens on `127.0.0.1:8080`. The local auth manager stores its generated password, and Airflow writes task logs and configuration, under the Linux `AIRFLOW_HOME` outside the repository. Start a second Ubuntu shell as the same account to operate the DAG.
+
+```bash
+source ./airflow/env.sh
+airflow dags list-import-errors
+airflow dags unpause databuild_pipeline
+airflow dags trigger databuild_pipeline --run-id manual-verification
+airflow tasks states-for-dag-run databuild_pipeline manual-verification
+```
+
+The DAG defaults to manual runs. Set `DATABUILD_SCHEDULE` to a cron expression, for example `0 6 * * *`, before starting Airflow to enable scheduling in `America/Cuiaba`. Past schedules are skipped. Monitor task states, retries and verification counts in Airflow. For a failed load, consult the existing Bronze or Silver status CLI and the local SQL Server logs, then let the scheduler retry or trigger a new run after resolving the cause.
+
+### Incremental ingestion and sequence changes
+
+- Deliver complete workbooks as `MED *.xlsx` through an atomic rename into `data/` or `DATABUILD_INPUT_DIR`. Matching content is counted and skipped by SHA-256 without opening a new load. In a candidate database, unseen measurement numbers are added to Bronze. A batch interrupted after some files commit resumes from the missing hashes. A file and its load receipt commit together.
+- A new measurement against a sealed sequence, a changed workbook for an existing measurement number or the same content assigned to a different number stops discovery before ingestion. Keep these files in a separate local intake folder for review. An aborted run remains visible in Airflow. Review the full sequence with the data owner, choose one approved workbook per measurement number and provision a separate SQL Server database and pipeline login with the existing migrations. Run the DAG against that candidate using a separate Airflow instance or with the current instance stopped and reconfigured.
+- Verify the candidate end to end and obtain approval before redirecting consumers. Keep the previous database and its publication available. The DAG never switches the consumer database, deletes a published sequence or selects a revision automatically.
+
+The two local verification runs completed all six tasks. Both recognized six duplicates, kept the existing Silver and Gold publication, and reported zero discrepancies. Table fingerprints across all three layers and hashes of the six original workbooks matched before and after the runs.
+
+---
+
 ## Target Architecture
 
-Stages 01 through 06 deliver extraction diagnostics, a validation engine, the SQL Server schema, Bronze ingestion, Silver processing and Gold publication. Planned work includes Airflow orchestration, Power BI and the web application.
+Stages 01 through 07 deliver extraction diagnostics, a validation engine, the SQL Server schema, Bronze ingestion, Silver processing, Gold publication and Airflow orchestration. Planned work includes Power BI and the web application.
 
 | Layer | Role |
 |---|---|

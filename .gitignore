@@ -17,11 +17,20 @@ reference/
 # Saídas derivadas dos dados reais (valores, itens e células da empresa)
 outputs/
 *.log
+*.bak
+*.trn
+*.dump
+*.backup
 
 # Ambiente local
 .env
-.env.local
+.env.*
+!/.env.example
 .runtime/
+airflow.cfg
+airflow.db*
+simple_auth_manager_passwords.json*
+/airflow/logs/
 .venv/
 venv/
 __pycache__/
