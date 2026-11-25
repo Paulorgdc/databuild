@@ -36,7 +36,8 @@ TABELAS_ESPERADAS = {
                "ocorrencia_causa_raiz", "log_processamento", "execucao", "medicao_origem",
                "ocorrencia_origem", "stg_valor_item"},
     "gold": {"dim_data", "dim_obra", "dim_medicao", "dim_item", "dim_regra", "dim_classe", "dim_severidade",
-             "dim_causa", "fact_valor_item", "fact_medicao", "fact_ocorrencia", "bridge_cascata_primaria"},
+             "dim_causa", "fact_valor_item", "fact_medicao", "fact_ocorrencia", "bridge_cascata_primaria",
+             "publicacao", "fact_pendencia_valor"},
 }
 
 
@@ -274,8 +275,12 @@ class BancoSQLServer(unittest.TestCase):
             self.assertEqual(reais, esperadas, schema)
 
     def test_valores_financeiros_sao_decimal(self):
-        cols = self.q("""SELECT TABLE_SCHEMA + '.' + TABLE_NAME + '.' + COLUMN_NAME, DATA_TYPE, NUMERIC_PRECISION, NUMERIC_SCALE
-                         FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA IN ('silver','gold')
+        cols = self.q("""SELECT c.TABLE_SCHEMA + '.' + c.TABLE_NAME + '.' + c.COLUMN_NAME,
+                                c.DATA_TYPE, c.NUMERIC_PRECISION, c.NUMERIC_SCALE
+                         FROM INFORMATION_SCHEMA.COLUMNS c JOIN INFORMATION_SCHEMA.TABLES t
+                            ON t.TABLE_CATALOG = c.TABLE_CATALOG AND t.TABLE_SCHEMA = c.TABLE_SCHEMA
+                            AND t.TABLE_NAME = c.TABLE_NAME AND t.TABLE_TYPE = 'BASE TABLE'
+                         WHERE c.TABLE_SCHEMA IN ('silver','gold')
                            AND (COLUMN_NAME NOT LIKE '%[_]id' AND COLUMN_NAME NOT LIKE '%[_]key' AND (COLUMN_NAME LIKE 'valor%' OR COLUMN_NAME LIKE 'val[_]%' OR COLUMN_NAME IN ('saldo','diferenca')
                                 OR COLUMN_NAME LIKE 'contrato[_]%' OR COLUMN_NAME LIKE 'impacto%'))""")
         self.assertGreater(len(cols), 20)
@@ -486,11 +491,14 @@ class BancoSQLServer(unittest.TestCase):
         self.assertEqual(self._como(B, "SELECT TOP 1 * FROM dbo.schema_migration"), "negado")
         self.assertEqual(self._como(B, "DELETE FROM gold.dim_causa WHERE 1 = 0"), "negado")
         self.assertEqual(self._como(B, "EXEC gold.usp_carregar_gold"), "negado")
+        self.assertEqual(self._como(B, "EXEC gold.usp_publicar_execucao @execucao_id = NULL"), "negado")
         self.assertEqual(self._como(B, "CREATE TABLE gold.x_teste (a INT)"), "negado")
         # Pipeline: lê e grava nas três camadas e executa a carga; não altera esquema
         self.assertEqual(self._como(P, "SELECT TOP 1 * FROM silver.ocorrencia"), "permitido")
         self.assertEqual(self._como(P, "INSERT INTO bronze.carga (origem) VALUES (N'perm')"), "permitido")
-        self.assertEqual(self._como(P, "EXEC gold.usp_carregar_gold"), "permitido")
+        self.assertEqual(self._como(P, "EXEC gold.usp_carregar_gold"), "negado")
+        self.assertEqual(self._como(P, "IF COALESCE(HAS_PERMS_BY_NAME(N'gold.usp_publicar_execucao', N'OBJECT', N'EXECUTE'), 0) <> 1 "
+                                      "THROW 51000, N'Permissão de publicação ausente', 1;"), "permitido")
         self.assertEqual(self._como(P, "CREATE TABLE silver.x_teste (a INT)"), "negado")
         self.assertEqual(self._como(P, "SELECT TOP 1 * FROM dbo.schema_migration"), "negado")
 

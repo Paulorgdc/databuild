@@ -36,6 +36,7 @@ Monthly measurements of a construction job are kept in Excel workbooks full of h
 | Database administration CLI (`init-env`, `migrate`, `provision`, `check`, `status`) | `scripts/dbadmin.py` |
 | Bronze workbook ingestion, load history and integrity verification (Stage 04) | `database/migrations/009_bronze_ingestao.sql`, `scripts/ingest.py` |
 | Silver promotion, validation and Bronze lineage (Stage 05) | `database/migrations/010_silver_processamento.sql`, `011_silver_indices.sql`, `scripts/silver.py` |
+| Gold publication, measurement indicators and reconciliation (Stage 06) | `database/migrations/012_gold_publicacao.sql`, `scripts/gold.py` |
 | Unit, integration, mutation and live SQL Server tests | `tests/` (tests only) |
 
 The repository is public, but the code is proprietary. Workbooks (`data/`, ignored entirely), derived results (`outputs/`) and extension records (`reference/`) are kept locally and are never versioned. The company is identified publicly only as **Construtora Horizontes**.
@@ -126,9 +127,30 @@ The local run published six measurements, 7,920 typed values and 306 findings. A
 
 ---
 
+## Stage 06: Gold publication
+
+Apply the migrations with the SQL Server administrator and publish the completed Silver execution with the pipeline login.
+
+```powershell
+.venv/Scripts/python.exe scripts/dbadmin.py migrate
+.venv/Scripts/python.exe scripts/gold.py run --json
+.venv/Scripts/python.exe scripts/gold.py status --json
+.venv/Scripts/python.exe scripts/gold.py verify --json
+```
+
+Use `run --execucao <id>` to select a completed Silver execution explicitly. A replay returns the existing publication and preserves its fact keys. The loader checks the source execution and reconciles fact counts and booked impact inside the publication transaction. Gold rows without a publication record require operator review.
+
+`gold.fact_medicao` holds one row per measurement. `gold.fact_valor_item` keeps stored and recalculated monetary values at measurement × item grain. Both preserve SQL NULLs. `gold.fact_pendencia_valor` keeps missing-data and contractual statuses at measurement × item × field grain. `gold.fact_ocorrencia` stores findings and their booked impact. Only primaries marked in Silver contribute to that amount. The accumulated amount and balance describe a measurement at a point in time. Use a single measurement for those indicators.
+
+`gold.vw_qualidade_medicao` aggregates findings, cascades and pending values by measurement. Gold retains the Silver measurement and finding identifiers for lineage. The existing reporting login can read the Gold view and facts.
+
+The local publication reconciled six measurements, 720 item facts, 306 findings, 143 cascade-to-primary links and 2,570 pending fields. Verification reported zero differences against Silver and a repeat left the publication unchanged.
+
+---
+
 ## Target Architecture
 
-Stages 01 through 05 deliver extraction diagnostics, a validation engine, the SQL Server schema, Bronze ingestion and Silver processing. Planned work includes the Gold pipeline, Airflow orchestration, Power BI and the web application.
+Stages 01 through 06 deliver extraction diagnostics, a validation engine, the SQL Server schema, Bronze ingestion, Silver processing and Gold publication. Planned work includes Airflow orchestration, Power BI and the web application.
 
 | Layer | Role |
 |---|---|
@@ -138,7 +160,7 @@ Stages 01 through 05 deliver extraction diagnostics, a validation engine, the SQ
 | Bronze | Raw workbook data and load history from Stage 04 |
 | Silver | Typed measurements, calculated values and validation with Bronze lineage |
 | PySpark | JDBC extraction and typed staging for Silver |
-| Gold | Indicators and validated data |
+| Gold | Published dimensional facts, quality indicators and pending values |
 | Apache Airflow | Full pipeline orchestration |
 | Power BI | Direct consumption of Gold through SQL (`dashboard/`) |
 | Web application | Batch import, audit and validation of measurements |
