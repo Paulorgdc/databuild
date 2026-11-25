@@ -38,6 +38,7 @@ Monthly measurements of a construction job are kept in Excel workbooks full of h
 | Silver promotion, validation and Bronze lineage (Stage 05) | `database/migrations/010_silver_processamento.sql`, `011_silver_indices.sql`, `scripts/silver.py` |
 | Gold publication, measurement indicators and reconciliation (Stage 06) | `database/migrations/012_gold_publicacao.sql`, `scripts/gold.py` |
 | Airflow DAG, Ubuntu setup and incremental intake (Stage 07) | `airflow/`, `scripts/orquestrar.py` |
+| Editable Power BI report, Gold semantic model and reconciliation (Stage 08) | `dashboard/build.py`, `dashboard/reconcile.py` |
 | Unit, integration, mutation and live SQL Server tests | `tests/` (tests only) |
 
 The repository is public, but the code is proprietary. Workbooks (`data/`, ignored entirely), derived results (`outputs/`) and extension records (`reference/`) are kept locally and are never versioned. The company is identified publicly only as **Construtora Horizontes**.
@@ -198,9 +199,42 @@ The two local verification runs completed all six tasks. Both recognized six dup
 
 ---
 
+## Stage 08 — Power BI
+
+Generate a new editable project under the ignored `dashboard/local/` directory. The generator uses the existing SQL Server endpoint configuration and refuses to overwrite a project. Use `--name <folder>` to create a separate copy.
+
+```powershell
+.venv/Scripts/python.exe -m dashboard.build
+Invoke-Item -LiteralPath dashboard/local/DataBuild/DataBuild.pbip
+```
+
+In Power BI Desktop, select **Home → Refresh**. On the first connection, choose **Database** authentication and enter the Stage 03 reporting login using `DATABUILD_POWERBI_USER` and `DATABUILD_POWERBI_PASSWORD` from `.env.local`. Desktop manages these credentials for the current Windows user. For the existing self-signed instance on this workstation, set `$env:PBI_SQL_TRUSTED_SERVERS = 'localhost'` in the PowerShell session before opening a fresh Desktop process. Use a trusted SQL Server certificate on shared infrastructure. [Microsoft SQL Server connector](https://learn.microsoft.com/en-us/power-query/connectors/sqlserver#sql-server-certificate-isnt-trusted-on-the-client-power-bi-desktop-or-on-premises-data-gateway)
+
+Power Query imports selected columns from the SQL Server `gold` schema. The model reuses the date, work, measurement, item, rule, class, severity and cause dimensions. Four facts preserve the measurement, measurement × item, finding and measurement × item × field grains. Filters propagate in one direction. The report uses the public case name **Construtora Horizontes**.
+
+| Page | Use |
+|---|---|
+| Visão geral | Review official measurement totals, finding counts, primary errors and cascades. |
+| Análise financeira | Filter by measurement, category and service to compare original and recalculated measured, contract, accumulated and balance amounts. |
+| Inconsistências | Filter by class, severity and rule. Inspect finding IDs, cells, primary errors, cascades, suspicions and legitimate exceptions. |
+| Auditoria e decisão | Review pending fields, contractual checks and the suggested review priority by measurement. |
+
+The model contains 32 DAX measures and uses fixed decimal for money. Period flow is additive across measurements. Contract, accumulated amounts and balances use the last measurement in the active scope. Financial detail aggregates leaf services so parent subtotals enter no second time. Totals stay blank when a required amount is missing, and deltas require both amounts. Booked impact includes only flagged, proven primary findings. Contractual findings and contract-dependent fields are separate indicators.
+
+Run the read-only verification after refresh. Pass the port of the specific open project, available to Power BI external tools or in its `msmdsrv.port.txt` under `%LOCALAPPDATA%\Microsoft\Power BI Desktop\AnalysisServicesWorkspaces`.
+
+```powershell
+.venv/Scripts/python.exe -m dashboard.reconcile --baseline
+.venv/Scripts/python.exe -m dashboard.reconcile --baseline --port 12345
+```
+
+Replace `12345` with the current project port. Use `--baseline` for the audited six-measurement sequence. The SQL check compares the counts to the Gold quality view. With `--port`, the reconciler compares DAX to SQL for measurement, date, category, service, finding class and an empty selection. It reports measure names and counts without printing amounts or business identifiers.
+
+Only the generators and verifier are versioned. Keep generated PBIP/PBIR/TMDL, PBIX, caches and screenshots in the ignored project directory with local access controls. Edit the generated project in Desktop, or change the generators and produce a new copy. PBIP supports text-based authoring and the Desktop Bridge can open and reload definitions. This workflow uses Desktop for authentication and refresh and the local Analysis Services endpoint for DAX. [Microsoft PBIP documentation](https://learn.microsoft.com/en-us/power-bi/developer/projects/projects-overview) · [Desktop Bridge](https://learn.microsoft.com/en-us/power-bi/developer/agentic/power-bi-desktop-bridge-overview)
+
 ## Target Architecture
 
-Stages 01 through 07 deliver extraction diagnostics, a validation engine, the SQL Server schema, Bronze ingestion, Silver processing, Gold publication and Airflow orchestration. Planned work includes Power BI and the web application.
+Stages 01 through 08 cover extraction diagnostics, validation, the SQL Server schema, Bronze ingestion, Silver processing, Gold publication, Airflow orchestration and the Power BI report. The web application is planned.
 
 | Layer | Role |
 |---|---|
@@ -212,7 +246,7 @@ Stages 01 through 07 deliver extraction diagnostics, a validation engine, the SQ
 | PySpark | JDBC extraction and typed staging for Silver |
 | Gold | Published dimensional facts, quality indicators and pending values |
 | Apache Airflow | Full pipeline orchestration |
-| Power BI | Direct consumption of Gold through SQL (`dashboard/`) |
+| Power BI | Power BI Desktop project using Import from Gold (`dashboard/`) |
 | Web application | Batch import, audit and validation of measurements |
 
 ---

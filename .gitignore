@@ -1,8 +1,21 @@
 # Dados e documentos confidenciais: nunca versionar (repositório público; sem exceções)
 /data/
-# dashboard/ recebe o futuro Power BI; só a pasta é versionada
-dashboard/*
-!dashboard/.gitkeep
+# Power BI: versionar somente os autores do projeto, nunca saídas do Desktop.
+/dashboard/*
+!/dashboard/.gitkeep
+!/dashboard/build.py
+!/dashboard/model.py
+!/dashboard/report.py
+!/dashboard/reconcile.py
+!/dashboard/query-desktop.ps1
+.pbi/
+*.abf
+*.pbip
+*.pbir
+*.pbism
+*.tmdl
+*.pbix
+*.pbit
 # anexos de extensão, fotos de campo e referências com dados pessoais
 reference/
 *.xlsx
@@ -10,8 +23,6 @@ reference/
 *.xls
 *.xlsb
 *.csv
-*.pbix
-*.pbit
 ~$*
 
 # Saídas derivadas dos dados reais (valores, itens e células da empresa)
@@ -24,6 +35,7 @@ outputs/
 
 # Ambiente local
 .env
+.env.local
 .env.*
 !/.env.example
 .runtime/
