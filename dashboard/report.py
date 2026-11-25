@@ -1,13 +1,15 @@
 """Author the four PBIR pages from presentation metadata and field bindings."""
 import hashlib
 
-from dashboard.model import MEASURES
+from dashboard.model import MEASURES, MONEY
 
 SCHEMA = "https://developer.microsoft.com/json-schemas/fabric/item/report"
 NAVY = "#122640"
 INK = "#162C47"
 TEAL = "#087F78"
 BLUE = "#225E9C"
+AMBER = "#A85B13"
+PLUM = "#755287"
 MUTED = "#4B647B"
 PAPER = "#EDF3F7"
 WHITE = "#FFFFFF"
@@ -77,12 +79,11 @@ class Page:
             ("DataBuild  /  Construtora Horizontes", 15, "#A5DCD5"),
             (title, 31, WHITE), (description, 15, "#D7E5EF"),
         ])
-        self.visual("navigation", "pageNavigator", (24, 128, W - 48, 41), objects={
-            "layout": style(orientation=expr("horizontal")),
-        }, chrome=False)
+        for index, (target, label, _) in enumerate(PAGES):
+            self.navigation(index, target, label)
 
     def visual(self, key, kind, bounds, *, title=None, query=None, objects=None,
-               chrome=True, background=WHITE, alt=None, descending=None, require_rows=None):
+               chrome=True, background=WHITE, alt=None, descending=None, require_rows=None, action=None):
         name = ident(f"{self.key}/{key}")
         self.index += 1
         x, y, w, h = bounds
@@ -109,6 +110,8 @@ class Page:
                                         fontFamily=expr("Segoe UI Semibold"), fontSize=expr(12))
         if alt or title:
             container["general"] = style(altText=expr(alt or title))
+        if action:
+            container["visualLink"] = action
         visual["visualContainerObjects"] = container
         payload = {
             "$schema": schema("visualContainer", "2.9.0"), "name": name,
@@ -129,6 +132,23 @@ class Page:
             }]}
         self.write_json(self.root / "visuals" / name / "visual.json", payload)
 
+    def navigation(self, index, target, label):
+        active = self.key == target
+        width = (W - 48 - 36) // 4
+        text = {"show": expr(True), "text": expr(label), "fontSize": expr(12),
+                "fontFamily": expr("Segoe UI Semibold"), "fontColor": color(WHITE if active else INK),
+                "horizontalAlignment": expr("center")}
+        fill = {"show": expr(True), "fillColor": color(TEAL if active else WHITE)}
+        shape = {"tileShape": expr("rectangleRounded"), "roundEdge": expr(6)}
+        icon = {"show": expr(False), "placement": expr("left")}
+        self.visual(f"nav-{target}", "actionButton", (24 + index * (width + 12), 128, width, 42),
+                    alt=label, chrome=False, action=style(show=expr(True), type=expr("PageNavigation"),
+                    navigationSection=expr(ident(target)), tooltip=expr(label)), objects={
+                        key: [{"properties": properties}, {"properties": properties,
+                              "selector": {"id": "default"}}]
+                        for key, properties in (("text", text), ("fill", fill), ("shape", shape), ("icon", icon))
+                    })
+
     def banner(self, key, bounds, background, lines):
         self.visual(key, "textbox", bounds, background=background, objects={
             "general": style(paragraphs=[{"textRuns": [{"value": text, "textStyle": {
@@ -147,9 +167,14 @@ class Page:
     def cards(self, *measures):
         width = (W - 48 - 12 * (len(measures) - 1)) // len(measures)
         for index, (binding, label) in enumerate(measures):
+            currency = MEASURES[binding[0]][binding[1]][1] == MONEY
+            labels = {"color": color(TEAL), "fontSize": expr(22 if currency else 24),
+                      "labelDisplayUnits": expr(1)}
+            if currency:
+                labels["labelPrecision"] = expr(2)
             self.visual(f"card-{index}", "card", (24 + index * (width + 12), 274, width, 104),
                         title=label, query={"Values": [binding]}, objects={
-                            "labels": style(color=color(TEAL), fontSize=expr(24), labelDisplayUnits=expr(0)),
+                            "labels": style(**labels),
                             "categoryLabels": style(show=expr(False)),
                         })
 
@@ -157,18 +182,25 @@ class Page:
         self.visual(key, "tableEx", bounds, title=title, query={"Values": columns},
                     descending=descending, require_rows=require_rows, objects={
                         "columnHeaders": style(autoSizeColumnWidth=expr(True), columnAdjustment=expr("growToFit"),
-                                               backColor=color(NAVY), fontColor=color(WHITE), fontSize=expr(10)),
+                                               backColor=color(NAVY), fontColor=color(WHITE), fontSize=expr(11)),
                         "values": style(backColorPrimary=color(WHITE), backColorSecondary=color("#F3F7FA"),
-                                        fontColorPrimary=color(INK), fontColorSecondary=color(INK), fontSize=expr(10)),
+                                        fontColorPrimary=color(INK), fontColorSecondary=color(INK), fontSize=expr(11)),
                     })
 
-    def chart(self, key, kind, bounds, title, category, *series, descending=None, require_rows):
+    def chart(self, key, kind, bounds, title, category, *series, colors, descending=None, require_rows):
+        if len(series) == 1:
+            points = style(defaultColor=color(colors[0]))
+        else:
+            points = [
+                {"properties": {"fill": color(shade)}, "selector": {"metadata": projection(binding)["queryRef"]}}
+                for binding, shade in zip(series, colors, strict=True)
+            ]
         self.visual(key, kind, bounds, title=title, query={"Category": [category], "Y": series},
                     descending=descending, require_rows=require_rows, objects={
                         "categoryAxis": style(showAxisTitle=expr(False)),
-                        "valueAxis": style(showAxisTitle=expr(False), labelDisplayUnits=expr(0)),
+                        "valueAxis": style(showAxisTitle=expr(False), labelDisplayUnits=expr(1)),
                         "legend": style(show=expr(len(series) > 1)),
-                        "dataPoint": style(defaultColor=color(BLUE)),
+                        "dataPoint": points,
                     })
 
 
@@ -220,7 +252,8 @@ def write_report(root, write_json):
                    (total, "Ocorrências registradas"), (primary, "Erros primários"),
                    (impacts, "Impactos contabilizados"))
     overview.chart("volume", "clusteredColumnChart", (24, 396, 508, 378),
-                   "Primários e cascatas por medição", med, primary, cascades, require_rows=measurements)
+                   "Primários e cascatas por medição", med, primary, cascades,
+                   colors=(BLUE, AMBER), require_rows=measurements)
     overview.table("rollup", (544, 396, 792, 378), "Resumo por medição",
                    med, summary("Medido oficial"), summary("Acumulado oficial no corte"),
                    summary("Saldo oficial no corte"), total, pending_count, require_rows=measurements)
@@ -246,9 +279,9 @@ def write_report(root, write_json):
     findings.cards((primary, "Erros primários"), (cascades, "Cascatas"), (issue("Suspeitas"), "Suspeitas"),
                    (issue("Exceções legítimas"), "Exceções legítimas"), (contract, "Validações contratuais"))
     findings.chart("severity", "clusteredBarChart", (24, 396, 334, 176),
-                   "Ocorrências por severidade", sev, total, descending=total, require_rows=total)
+                   "Ocorrências por severidade", sev, total, colors=(PLUM,), descending=total, require_rows=total)
     findings.chart("rules", "clusteredBarChart", (24, 584, 334, 190),
-                   "Ocorrências por regra", rule, total, descending=total, require_rows=total)
+                   "Ocorrências por regra", rule, total, colors=(TEAL,), descending=total, require_rows=total)
     findings.table("register", (370, 396, 966, 378), "Registro de ocorrências",
                    med, code, issue("Ocorrência"), rule, class_, field("Causa", "Causa"), sev,
                    issue("Célula"), total, financial_impact, require_rows=total)

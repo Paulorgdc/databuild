@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from dashboard.build import build
-from dashboard.model import MEASURES, RELATIONSHIPS, TABLES
+from dashboard.model import MEASURES, MONEY, RELATIONSHIPS, TABLES
 from dashboard.reconcile import COUNT_COLUMNS, dax_query
 from dashboard.report import PAGES, ident
 
@@ -42,7 +42,13 @@ class DashboardTest(unittest.TestCase):
             self.assertEqual(page["displayName"], name)
             visuals = [self.read(v) for v in folder.glob("visuals/*/visual.json")]
             types = {v["visual"]["visualType"] for v in visuals}
-            self.assertTrue({"pageNavigator", "tableEx", "slicer"}.issubset(types))
+            self.assertTrue({"actionButton", "tableEx", "slicer"}.issubset(types))
+            destinations = {
+                v["visual"]["visualContainerObjects"]["visualLink"][0]["properties"]
+                ["navigationSection"]["expr"]["Literal"]["Value"].strip("'")
+                for v in visuals if v["visual"]["visualType"] == "actionButton"
+            }
+            self.assertEqual(destinations, set(order))
             for visual in visuals:
                 pos = visual["position"]
                 self.assertLessEqual(pos["x"] + pos["width"], page["width"])
@@ -57,6 +63,23 @@ class DashboardTest(unittest.TestCase):
                         table = expr["Expression"]["SourceRef"]["Entity"]
                         available = MEASURES[table] if kind == "Measure" else TABLES[table][1]
                         self.assertIn(expr["Property"], available)
+
+    def test_financial_display_and_distinct_chart_series(self):
+        money = [(table, name) for table, measures in MEASURES.items()
+                 for name, (_, fmt) in measures.items() if fmt == MONEY]
+        self.assertEqual(len(money), 17)
+        self.assertEqual(MONEY.count("0.00"), 3)
+        self.assertNotIn("0.000", MONEY)
+        for table, name in money:
+            definition = (self.model / "tables" / f"{table}.tmdl").read_text(encoding="utf-8")
+            self.assertIn(f"measure '{name}'", definition)
+            self.assertIn(f"formatString: {MONEY}", definition)
+        chart = self.read(self.report / "pages" / ident("overview") / "visuals" /
+                          ident("overview/volume") / "visual.json")["visual"]
+        series = chart["query"]["queryState"]["Y"]["projections"]
+        fills = chart["objects"]["dataPoint"]
+        self.assertEqual([p["queryRef"] for p in series], [p["selector"]["metadata"] for p in fills])
+        self.assertNotEqual(fills[0]["properties"]["fill"], fills[1]["properties"]["fill"])
 
     def test_gold_only_and_single_direction_dimensions(self):
         for table, (source, _) in TABLES.items():

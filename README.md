@@ -219,7 +219,9 @@ Power Query imports selected columns from the SQL Server `gold` schema. The mode
 | Inconsistências | Filter by class, severity and rule. Inspect finding IDs, cells, primary errors, cascades, suspicions and legitimate exceptions. |
 | Auditoria e decisão | Review pending fields, contractual checks and the suggested review priority by measurement. |
 
-The model contains 32 DAX measures and uses fixed decimal for money. Period flow is additive across measurements. Contract, accumulated amounts and balances use the last measurement in the active scope. Financial detail aggregates leaf services so parent subtotals enter no second time. Totals stay blank when a required amount is missing, and deltas require both amounts. Booked impact includes only flagged, proven primary findings. Contractual findings and contract-dependent fields are separate indicators.
+The model contains 32 DAX measures and 13 active, single-direction relationships. The 17 financial measures retain fixed-decimal precision and display Brazilian reais to two decimal places. Period flow is additive across measurements. Contract, accumulated amounts and balances use the last measurement in the active scope. Financial detail aggregates leaf services to avoid counting parent subtotals twice. Totals stay blank when a required amount is missing, and deltas require both amounts. Booked impact includes only flagged, proven primary findings. Contractual findings and contract-dependent fields are separate indicators.
+
+Each page includes buttons for the four report destinations. The overview chart uses blue for primary errors and amber for cascades, with a labeled legend. The inconsistency charts use separate colors for severity and rule. Financial tables show missing values as blanks and cards use the Desktop blank indicator.
 
 Run the read-only verification after refresh. Pass the port of the specific open project, available to Power BI external tools or in its `msmdsrv.port.txt` under `%LOCALAPPDATA%\Microsoft\Power BI Desktop\AnalysisServicesWorkspaces`.
 
@@ -229,6 +231,8 @@ Run the read-only verification after refresh. Pass the port of the specific open
 ```
 
 Replace `12345` with the current project port. Use `--baseline` for the audited six-measurement sequence. The SQL check compares the counts to the Gold quality view. With `--port`, the reconciler compares DAX to SQL for measurement, date, category, service, finding class and an empty selection. It reports measure names and counts without printing amounts or business identifiers.
+
+The authenticated Desktop import matched all 416 DAX results across 13 contexts, including blanks and numeric zeroes. Gold confirmed 306 findings across six measurements with 111 primary errors, 91 cascades, 47 suspicions, 40 legitimate exceptions and 17 contractual checks. It also confirmed 62 booked impacts and 2,570 pending fields, including two that depend on contract validation.
 
 Only the generators and verifier are versioned. Keep generated PBIP/PBIR/TMDL, PBIX, caches and screenshots in the ignored project directory with local access controls. Edit the generated project in Desktop, or change the generators and produce a new copy. PBIP supports text-based authoring and the Desktop Bridge can open and reload definitions. This workflow uses Desktop for authentication and refresh and the local Analysis Services endpoint for DAX. [Microsoft PBIP documentation](https://learn.microsoft.com/en-us/power-bi/developer/projects/projects-overview) · [Desktop Bridge](https://learn.microsoft.com/en-us/power-bi/developer/agentic/power-bi-desktop-bridge-overview)
 

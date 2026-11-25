@@ -78,8 +78,8 @@ RELATIONSHIPS = (
         ("Severidade", "severidade_key"), ("Causa", "causa_key"))),
 )
 
-# Fixed decimal currency. Include four decimal places, which Gold actually stores.
-MONEY = '"R$ "#,0.0000;-"R$ "#,0.0000;"R$ "0.0000'
+# Gold and DAX retain four decimal places. Only the display rounds to cents.
+MONEY = '"R$ "#,0.00;-"R$ "#,0.00;"R$ "0.00'
 COUNT = "#,0"
 MEASURES = {
     "Resumo": {
