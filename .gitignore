@@ -16,6 +16,7 @@ reference/
 
 # Saídas derivadas dos dados reais (valores, itens e células da empresa)
 outputs/
+*.log
 
 # Ambiente local
 .env

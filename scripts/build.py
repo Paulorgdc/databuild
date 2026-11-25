@@ -32,20 +32,30 @@ def _iso(v):
     return v.strftime("%Y-%m-%d") if hasattr(v, "year") else None
 
 
-def periodo_e_contrato(m: C.Med, numero: int):
-    """(início, fim, contrato do controle) a partir do controle financeiro."""
+def origens_controle(m: C.Med, numero: int) -> dict[str, str]:
+    """Localiza as células que fornecem as datas e o contrato do controle."""
     lay = C.find_fin_layout(m.wb)
     if not lay:
-        return None, None, None
-    ws, wsv = m.wb[C.FIN_SHEET], m.wv[C.FIN_SHEET]
-    ini = fim = None
+        return {}
+    ws = m.wb[C.FIN_SHEET]
+    origens = {}
     for r in lay["rows"]:
         mt = re.match(r"\s*(\d+)", str(ws[f"{lay['label']}{r}"].value))
         if mt and int(mt.group(1)) == numero:
-            ini = _iso(ws[f"{lay['ini']}{r}"].value) if lay["ini"] else None
-            fim = _iso(ws[f"{lay['fim']}{r}"].value) if lay["fim"] else None
-    contrato = C.num(wsv[lay["contrato"]].value) if lay["contrato"] else None
-    return ini, fim, contrato
+            for campo, chave in (("periodo_inicio", "ini"), ("periodo_fim", "fim")):
+                if lay[chave]:
+                    origens[campo] = f"{lay[chave]}{r}"
+    if lay["contrato"]:
+        origens["contrato_controle"] = lay["contrato"]
+    return origens
+
+
+def periodo_e_contrato(m: C.Med, numero: int):
+    origens = origens_controle(m, numero)
+    datas = [_iso(m.wb[C.FIN_SHEET][origens[k]].value) if k in origens else None
+             for k in ("periodo_inicio", "periodo_fim")]
+    contrato = origens.get("contrato_controle")
+    return *datas, C.num(m.wv[C.FIN_SHEET][contrato].value) if contrato else None
 
 
 def construir(m: C.Med, obra_id: str = "OBRA-1") -> M.Medicao:
@@ -89,4 +99,4 @@ def construir(m: C.Med, obra_id: str = "OBRA-1") -> M.Medicao:
     ini, fim, contrato = periodo_e_contrato(m, numero)
     return M.Medicao(id=m.label, obra_id=obra_id, numero=numero, linhas=linhas, colunas=campos,
                      periodo_inicio=ini, periodo_fim=fim, contrato_controle=contrato,
-                     arquivo_sha256=sha256(m.path))
+                     arquivo_sha256=m.arquivo_sha256 or sha256(m.path))

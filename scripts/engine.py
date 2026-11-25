@@ -70,8 +70,7 @@ def _chave_celula(c: str):
     return (int(m.group(2)), m.group(1)) if m else (0, c or "")
 
 
-def _uma(path: Path, obra_id: str):
-    m = C.load(Path(path))
+def _uma(m: C.Med, obra_id: str):
     med = build.construir(m, obra_id)
     occs = [o for o in rules.run_all(m)[0]]
     occs += recalc.detectar(med)
@@ -81,14 +80,19 @@ def _uma(path: Path, obra_id: str):
 
 
 def audit(path, obra_id: str = "OBRA-1") -> Resultado:
-    med, occs = _uma(Path(path), obra_id)
+    med, occs = _uma(C.load(Path(path)), obra_id)
     return Resultado([med], finalizar(occs, {med.id: med.contrato_total()}))
 
 
 def audit_batch(paths, obra_id: str = "OBRA-1") -> Resultado:
+    return audit_medicoes((C.load(p) for p in sorted(Path(x) for x in paths)), obra_id)
+
+
+def audit_medicoes(fontes, obra_id: str = "OBRA-1") -> Resultado:
+    """Valida fontes reconstruídas com os mesmos detectores e regras entre medições."""
     meds, occs = [], []
-    for p in sorted(Path(x) for x in paths):
-        med, o = _uma(p, obra_id)
+    for fonte in fontes:
+        med, o = _uma(fonte, obra_id)
         meds.append(med)
         occs += o
     occs += compare.comparar_todas(meds)

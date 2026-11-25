@@ -79,7 +79,7 @@ class Item:
 
 @dataclass
 class Med:
-    path: Path
+    path: Path | None
     label: str
     wb: openpyxl.Workbook
     wv: openpyxl.Workbook
@@ -89,6 +89,8 @@ class Med:
     items: dict[str, Item]
     first_row: int
     total_row: int | None
+    arquivo_sha256: str | None = None
+    total_celula: str | None = None
 
     def f(self, ref):  # fórmula/valor bruto
         return self.ws[ref].value
@@ -170,22 +172,29 @@ def build_items(ws, item_col: str, first_row: int, last_row: int) -> dict[str, I
 def load(path: Path) -> Med:
     wb = openpyxl.load_workbook(path)  # fórmulas
     wv = openpyxl.load_workbook(path, data_only=True)  # valores armazenados
+    return das_abas(label_of(path), wb, wv, path)
+
+
+def das_abas(label, wb, wv, path=None, arquivo_sha256=None) -> Med:
+    """Aplica a mesma descoberta estrutural às abas de qualquer origem."""
     ws, wsv = wb[MAIN_SHEET], wv[MAIN_SHEET]
     cols = find_columns(ws)
     first_row = 4
     total_row = None
+    total_celula = None
     for r in range(1, 400):
         for c in range(1, 8):
             v = ws.cell(r, c).value
             if isinstance(v, str) and "VALOR TOTAL DA OBRA" in v.upper():
                 total_row = r
+                total_celula = f"{get_column_letter(c)}{r}"
                 break
         if total_row:
             break
     last = total_row - 1 if total_row else 400
     items = build_items(ws, cols.get("item", "A"), first_row, last)
     cols.update(find_text_columns(ws, cols, items))
-    return Med(path, label_of(path), wb, wv, ws, wsv, cols, items, first_row, total_row)
+    return Med(path, label, wb, wv, ws, wsv, cols, items, first_row, total_row, arquivo_sha256, total_celula)
 
 
 def find_text_columns(ws, cols: dict, items: dict[str, "Item"]) -> dict[str, str]:

@@ -16,6 +16,8 @@ Só as primárias contabilizam impacto financeiro; cascatas repetem o mesmo dinh
 from __future__ import annotations
 
 import math
+from decimal import Decimal, ROUND_DOWN
+from operator import add, sub
 
 import catalog
 import model as M
@@ -59,29 +61,46 @@ def _ordem(med: Medicao) -> list[Linha]:
     return out
 
 
-def calcular_valores(med: Medicao) -> None:
-    """Preenche `Linha.local` e `Linha.recalc` em todas as linhas."""
+def calcular_valores(med: Medicao, entradas_exatas=None) -> None:
+    """Reusa as identidades com Decimal e propaga ausências quando fornecidas entradas exatas."""
+    exato = entradas_exatas is not None
+    zero = Decimal(0) if exato else 0.0
+
+    def combinar(a, b, operacao):
+        if exato and (a is None or b is None):
+            return None
+        return operacao(a or zero, b or zero)
+
+    def soma(valores):
+        if exato and any(v is None for v in valores):
+            return None
+        return sum((v or zero for v in valores), Decimal(0) if exato else 0)
+
+    def truncar(v):
+        return v.quantize(Decimal("0.01"), rounding=ROUND_DOWN) if exato else trunc2(v)
+
     for l in _ordem(med):
         loc, rec = {}, {}
+        origem = entradas_exatas[l.codigo] if exato else l.armazenado
         if l.tipo == "folha":
-            F, G, K = (l.armazenado.get(k) for k in ("qtd_contrato", "preco", "qtd_med"))
-            H = trunc2(F * G) if F is not None and G is not None else None
-            N = trunc2(K * G) if K is not None and G is not None else None
-            Mi = _st(l, "val_ant")
+            F, G, K = (origem.get(k) for k in ("qtd_contrato", "preco", "qtd_med"))
+            H = truncar(F * G) if F is not None and G is not None else None
+            N = truncar(K * G) if K is not None and G is not None else None
+            Mi = origem.get("val_ant")
             loc["valor_contrato"], loc["val_med"] = H, N
-            loc["val_ant"] = l.armazenado.get("val_ant")            # entrada primária
-            rec["valor_contrato"] = H if H is not None else l.armazenado.get("valor_contrato")
-            rec["val_med"] = N if N is not None else l.armazenado.get("val_med")
-            rec["val_ant"] = l.armazenado.get("val_ant")
-            loc["val_ac"] = Mi + _st(l, "val_med")
-            loc["saldo"] = _st(l, "valor_contrato") - _st(l, "val_ac")
-            rec["val_ac"] = (rec["val_ant"] or 0.0) + (rec["val_med"] or 0.0)
-            rec["saldo"] = (rec["valor_contrato"] or 0.0) - rec["val_ac"]
+            loc["val_ant"] = rec["val_ant"] = Mi
+            rec["valor_contrato"] = H if exato or H is not None else origem.get("valor_contrato")
+            rec["val_med"] = N if exato or N is not None else origem.get("val_med")
+            loc["val_ac"] = combinar(Mi, origem.get("val_med"), add)
+            loc["saldo"] = combinar(origem.get("valor_contrato"), origem.get("val_ac"), sub)
+            rec["val_ac"] = combinar(Mi, rec["val_med"], add)
+            rec["saldo"] = combinar(rec["valor_contrato"], rec["val_ac"], sub)
         else:
             ch = [med.linhas[c] for c in l.filhos if c in med.linhas]
             for campo in CAMPOS_CALC:      # grupo/total: todo campo é a soma dos filhos diretos
-                loc[campo] = sum(_st(c, campo) for c in ch)
-                rec[campo] = sum((c.recalc.get(campo) or 0.0) for c in ch)
+                armazenados = [(entradas_exatas[c.codigo] if exato else c.armazenado).get(campo) for c in ch]
+                loc[campo] = soma(armazenados)
+                rec[campo] = soma([c.recalc.get(campo) for c in ch])
         l.local, l.recalc = loc, rec
 
 

@@ -32,6 +32,12 @@ def _st(l: Linha, campo: str) -> float:
     return l.armazenado.get(campo) or 0.0
 
 
+def _anterior(o: Ocorrencia, med: Medicao, linha: Linha, campos):
+    o.referencias.extend((med.id, C.MAIN_SHEET, f"{med.colunas[campo]}{linha.row}", "anterior")
+                         for campo in campos if campo in med.colunas)
+    return o
+
+
 def comparar(ant: Medicao, atu: Medicao) -> list[Ocorrencia]:
     """Ocorrências atribuídas à medição ATUAL, comparada à anterior."""
     fa = {l.codigo: l for l in ant.folhas()}
@@ -46,8 +52,9 @@ def comparar(ant: Medicao, atu: Medicao) -> list[Ocorrencia]:
         ev = f"{ant.id}: {x.descricao[:40]} | contrato={_st(x, 'valor_contrato'):.2f} acumulado={_st(x, 'val_ac'):.2f}"
         if mant is not None and abs(mant) > TOL:
             ev += f" | AC ANTERIOR do grupo {pai.codigo} excede em {mant:.2f} a soma dos serviços restantes"
-        out.append(_oc(atu, "item_removido_entre_medicoes", pai, "val_ant", f"Serviço {cod} existia em {ant.id} e não está em {atu.id}",
-                       ev, cod, original=_st(x, "val_ac"), dif=mant))
+        o = _oc(atu, "item_removido_entre_medicoes", pai, "val_ant", f"Serviço {cod} existia em {ant.id} e não está em {atu.id}",
+                ev, cod, original=_st(x, "val_ac"), dif=mant)
+        out.append(_anterior(o, ant, x, ("val_ac", "valor_contrato")))
     for cod in sorted(set(fb) - set(fa), key=lambda c: fb[c].row):
         y = fb[cod]
         out.append(_oc(atu, "item_incluido_entre_medicoes", y, "valor_contrato", f"Serviço {cod} não existia em {ant.id}",
@@ -65,14 +72,16 @@ def comparar(ant: Medicao, atu: Medicao) -> list[Ocorrencia]:
         if x.servico != y.servico:
             mud.append(("qtd_contrato", f"código de serviço: {x.servico!r} → {y.servico!r}"))
         if mud:
-            out.append(_oc(atu, "cadastro_alterado_entre_medicoes", y, mud[0][0],
-                           f"Cadastro do serviço {cod} mudou desde {ant.id}", "; ".join(t for _, t in mud), cod))
+            o = _oc(atu, "cadastro_alterado_entre_medicoes", y, mud[0][0],
+                    f"Cadastro do serviço {cod} mudou desde {ant.id}", "; ".join(t for _, t in mud), cod)
+            out.append(_anterior(o, ant, x, dict(mud)))
         a_l, b_m = _st(x, "val_ac"), _st(y, "val_ant")
         if abs(a_l - b_m) > TOL:
-            out.append(_oc(atu, "acumulado_anterior_descontinuo", y, "val_ant",
-                           f"AC ANTERIOR de {cod} difere do AC ATUAL de {ant.id}",
-                           f"{ant.id} acumulado={a_l:.2f} | {atu.id} anterior={b_m:.2f}", cod,
-                           original=b_m, esperado=a_l, dif=b_m - a_l))
+            o = _oc(atu, "acumulado_anterior_descontinuo", y, "val_ant",
+                    f"AC ANTERIOR de {cod} difere do AC ATUAL de {ant.id}",
+                    f"{ant.id} acumulado={a_l:.2f} | {atu.id} anterior={b_m:.2f}", cod,
+                    original=b_m, esperado=a_l, dif=b_m - a_l)
+            out.append(_anterior(o, ant, x, ("val_ac",)))
     return out
 
 

@@ -92,6 +92,7 @@ class Ocorrencia:
     obra_id: str = ""
     versao_regra: str = ""
     contabiliza_impacto: bool = False    # True só em primárias com diferença financeira
+    referencias: list[tuple[str, str, str, str]] = field(default_factory=list)
 
     # compatibilidade com a Etapa 01
     @property
@@ -100,7 +101,9 @@ class Ocorrencia:
     def impacto(self): return self.diferenca
 
     def row(self):
-        return asdict(self)
+        dados = asdict(self)
+        dados.pop("referencias")
+        return dados
 
 
 # Esquema das tabelas exportadas (nome -> colunas). Tipos: texto, inteiro, decimal(18,2), booleano, data.

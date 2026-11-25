@@ -345,13 +345,15 @@ def d_embedded_constants(m: C.Med, kind):
 def d_group_constants(m: C.Med, kind):
     """Colunas de entrada (M) em grupos digitadas à mão: info para o relatório."""
     M_ = m.cols.get("val_ant")
-    n = sum(1 for r, k in kind.items() if k != "folha" and M_ and m.f(f"{M_}{r}") is not None
-            and not C.is_formula(m.f(f"{M_}{r}")))
-    if n:
-        yield Finding(m.label, m.ws.title, f"{M_}", "", "acumulado_anterior_digitado_em_grupos",
+    refs = [f"{M_}{r}" for r, k in kind.items() if k != "folha" and M_ and m.f(f"{M_}{r}") is not None
+            and not C.is_formula(m.f(f"{M_}{r}"))]
+    if refs:
+        o = Finding(m.label, m.ws.title, M_, "", "acumulado_anterior_digitado_em_grupos",
                       "excecao_legitima", "baixa",
                       "AC ANTERIOR é entrada manual (inclusive em grupos); só é erro se divergir da soma dos itens "
-                      "(testado em divergência_financeira_agregada)", f"{n} linhas de grupo com constante")
+                      "(testado em divergência_financeira_agregada)", f"{len(refs)} linhas de grupo com constante")
+        o.referencias = [(m.label, m.ws.title, c, "contexto") for c in refs]
+        yield o
 
 
 def d_repeated_codes(m: C.Med, kind):

@@ -35,6 +35,7 @@ Monthly measurements of a construction job are kept in Excel workbooks full of h
 | Connection layer (pyodbc, SQLAlchemy/Pandas, JDBC/Spark, Airflow URIs) | `scripts/db.py` |
 | Database administration CLI (`init-env`, `migrate`, `provision`, `check`, `status`) | `scripts/dbadmin.py` |
 | Bronze workbook ingestion, load history and integrity verification (Stage 04) | `database/migrations/009_bronze_ingestao.sql`, `scripts/ingest.py` |
+| Silver promotion, validation and Bronze lineage (Stage 05) | `database/migrations/010_silver_processamento.sql`, `011_silver_indices.sql`, `scripts/silver.py` |
 | Unit, integration, mutation and live SQL Server tests | `tests/` (tests only) |
 
 The repository is public, but the code is proprietary. Workbooks (`data/`, ignored entirely), derived results (`outputs/`) and extension records (`reference/`) are kept locally and are never versioned. The company is identified publicly only as **Construtora Horizontes**.
@@ -102,9 +103,32 @@ Excel error markers retain their source meaning. Empty cells contribute to sheet
 
 ---
 
+## Stage 05: Silver treatment and validation
+
+On Windows x64, the project runtime uses Python 3.14, Amazon Corretto JDK 17, Spark/PySpark 4.3.0, Pandas 2.3.3 and Microsoft JDBC 13.6.0 (jre11). The installer keeps Java and JDBC under `.runtime/` and Python packages in `.venv/`. Use the SQL Server administrator configured in `.env.local` for the migration. The promotion uses the pipeline login.
+
+```powershell
+python database/setup/install_silver.py
+.venv/Scripts/python.exe scripts/dbadmin.py migrate
+.venv/Scripts/python.exe scripts/silver.py run --json
+.venv/Scripts/python.exe scripts/silver.py status --json
+.venv/Scripts/python.exe scripts/silver.py verify --json
+# Compare with the existing Stage 02 exports and reviewer marks in outputs/.
+.venv/Scripts/python.exe scripts/silver.py verify --comparar-etapa02 --json
+.venv/Scripts/python.exe -m unittest discover -s tests -v
+```
+
+Spark reads Bronze sheets and cells via JDBC and writes typed DECIMAL values to execution-scoped staging. Pandas organizes the cell data and normalizes item text and validation flags. The Stage 02 engine validates the reconstructed sheets and compares consecutive measurements. A separate Decimal pass applies its recalculation identities and propagates missing inputs. Silver keeps cached, recalculated and pending values distinct, and stores findings with their root causes and source coordinates.
+
+SQL Server publishes measurements, items, values, formulas and findings in one transaction. The CLI reports failed runs and returns a nonzero exit code. Replaying a published manifest returns the existing execution ID. A different manifest requires an explicit revision decision before replacing the published sequence. Review references, including the red marks, are used only by the optional comparison command.
+
+The local run published six measurements, 7,920 typed values and 306 findings. All 306 finding IDs matched the Stage 02 baseline and all 15 reviewer red marks were covered. In the separate monetary projection, 1,367 results that Stage 02 computed with incomplete inputs remain NULL. Decimal truncation changed four service measurement values, which flowed through to the section totals, accumulated values and balances for 15 changes in total.
+
+---
+
 ## Target Architecture
 
-Stages 01 through 04 deliver extraction diagnostics, a workbook validation engine, the SQL Server schema, and Bronze ingestion. Planned work includes Silver processing with PySpark, Airflow orchestration, Power BI and the web application.
+Stages 01 through 05 deliver extraction diagnostics, a validation engine, the SQL Server schema, Bronze ingestion and Silver processing. Planned work includes the Gold pipeline, Airflow orchestration, Power BI and the web application.
 
 | Layer | Role |
 |---|---|
@@ -112,8 +136,8 @@ Stages 01 through 04 deliver extraction diagnostics, a workbook validation engin
 | Python, openpyxl, Pandas | Extraction |
 | SQL Server | Storage with schemas and roles from Stage 03 |
 | Bronze | Raw workbook data and load history from Stage 04 |
-| Silver | Treatment and validation |
-| PySpark | Processing and business rules |
+| Silver | Typed measurements, calculated values and validation with Bronze lineage |
+| PySpark | JDBC extraction and typed staging for Silver |
 | Gold | Indicators and validated data |
 | Apache Airflow | Full pipeline orchestration |
 | Power BI | Direct consumption of Gold through SQL (`dashboard/`) |

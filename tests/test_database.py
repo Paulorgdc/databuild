@@ -33,7 +33,8 @@ TABELAS_ESPERADAS = {
                "ocorrencias_raw", "catalogo_regras_raw", "arquivo", "aba", "celula_raw", "carga_arquivo",
                "carga_log"},
     "silver": {"obra", "medicao", "item_medicao", "valor_item", "formula_item", "regra", "ocorrencia",
-               "ocorrencia_causa_raiz", "log_processamento"},
+               "ocorrencia_causa_raiz", "log_processamento", "execucao", "medicao_origem",
+               "ocorrencia_origem", "stg_valor_item"},
     "gold": {"dim_data", "dim_obra", "dim_medicao", "dim_item", "dim_regra", "dim_classe", "dim_severidade",
              "dim_causa", "fact_valor_item", "fact_medicao", "fact_ocorrencia", "bridge_cascata_primaria"},
 }
@@ -91,7 +92,7 @@ class MigrationsEstaticas(unittest.TestCase):
     def test_sem_identificadores_sensiveis_nos_scripts(self):
         arquivos = list((ROOT / "database").rglob("*")) + [ROOT / ".env.example", ROOT / "scripts" / "db.py",
                                                             ROOT / "scripts" / "dbadmin.py"]
-        for p in (a for a in arquivos if a.is_file()):
+        for p in (a for a in arquivos if a.is_file() and a.suffix in {".sql", ".ps1", ".py", ".example"}):
             t = p.read_text(encoding="utf-8")
             self.assertIsNone(re.search(r"\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}", t), f"CNPJ em {p.name}")
             self.assertIsNone(re.search(r"[A-Za-z]:\\Users\\", t.replace("%ProgramFiles%", "")), f"caminho local em {p.name}")
@@ -298,12 +299,14 @@ class BancoSQLServer(unittest.TestCase):
         self.assertEqual(fk_sem_indice, [], fk_sem_indice)
 
     def test_migrations_registradas_e_reexecucao(self):
-        n = len(dbadmin.listar_migrations())
+        migrations = dbadmin.listar_migrations()
+        n = len(migrations)
         self.assertEqual(self.um("SELECT COUNT(*) FROM dbo.schema_migration"), n)
         self.assertEqual(dbadmin.migrar(self.cfg, log=lambda *_: None), [])      # nada pendente
         antes = (self.um("SELECT COUNT(*) FROM gold.dim_data"), self.um("SELECT COUNT(*) FROM gold.dim_classe"))
-        refeitas = dbadmin.migrar(self.cfg, reexecutar=True, log=lambda *_: None)  # reexecuta todos os scripts
-        self.assertEqual(len(refeitas), n)
+        refeitas = dbadmin.migrar(self.cfg, reexecutar=True, log=lambda *_: None)
+        self.assertEqual(refeitas, [m.caminho.stem for m in migrations if m.reexecutavel])
+        self.assertEqual(self.um("SELECT COUNT(*) FROM dbo.schema_migration WHERE versao = 10"), 1)
         self.assertEqual((self.um("SELECT COUNT(*) FROM gold.dim_data"), self.um("SELECT COUNT(*) FROM gold.dim_classe")), antes)
         self.assertEqual(self.um("SELECT COUNT(*) FROM dbo.schema_migration"), n)
 

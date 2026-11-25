@@ -28,6 +28,8 @@ PREFIXO_TESTE = "databuild_test_"
 PAPEIS_BANCO = {"pipeline": "rl_databuild_pipeline", "powerbi": "rl_databuild_powerbi_reader"}
 _GO = re.compile(r"^\s*GO\s*(?:--.*)?$", re.IGNORECASE | re.MULTILINE)
 _NOME_ARQUIVO = re.compile(r"^(\d{3})_([a-z0-9_]+)\.sql$")
+# A migration 010 contém alterações estruturais de aplicação única e seu checksum já é imutável.
+_APLICACAO_UNICA = {"010_silver_processamento"}
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,10 @@ class Migration:
     caminho: Path
     sql: str
     checksum: str
+
+    @property
+    def reexecutavel(self) -> bool:
+        return self.caminho.stem not in _APLICACAO_UNICA
 
 
 def listar_migrations(pasta: Path = MIGRATIONS) -> list[Migration]:
@@ -86,7 +92,7 @@ CREATE TABLE dbo.schema_migration (
 
 
 def migrar(cfg: db.Config | None = None, reexecutar: bool = False, log=print) -> list[str]:
-    """Aplica as migrations pendentes. `reexecutar=True` roda todos os scripts de novo (teste de idempotência).
+    """Aplica as migrations pendentes. `reexecutar=True` também roda os scripts reexecutáveis.
     Devolve os nomes das migrations executadas. Falha se uma migration já aplicada foi alterada."""
     cfg = cfg or db.Config.do_ambiente()
     migs = listar_migrations()
@@ -96,12 +102,12 @@ def migrar(cfg: db.Config | None = None, reexecutar: bool = False, log=print) ->
         n = _executar_lotes(master, migs[0].sql, cfg.banco)
         log(f"  000 {migs[0].nome}: {n} lote(s) no master")
 
-    with db.sessao("admin", cfg, autocommit=True) as conn:
+    with db.sessao("admin", cfg) as conn:
         cur = conn.cursor()
         cur.execute(_TABELA_CONTROLE)
         aplicadas = {r[0]: r[1] for r in cur.execute("SELECT versao, checksum_sha256 FROM dbo.schema_migration")}
         for m in migs:
-            if m.versao in aplicadas and not reexecutar:
+            if m.versao in aplicadas and (not reexecutar or not m.reexecutavel):
                 if aplicadas[m.versao] != m.checksum:
                     raise RuntimeError(f"migration {m.versao:03d}_{m.nome} foi alterada depois de aplicada; "
                                        "crie uma nova migration em vez de editar a antiga")
@@ -112,6 +118,7 @@ def migrar(cfg: db.Config | None = None, reexecutar: bool = False, log=print) ->
             cur.execute("DELETE FROM dbo.schema_migration WHERE versao = ?", m.versao)
             cur.execute("INSERT INTO dbo.schema_migration (versao, nome, checksum_sha256) VALUES (?, ?, ?)",
                         m.versao, m.nome, m.checksum)
+            conn.commit()
             executadas.append(f"{m.versao:03d}_{m.nome}")
     return executadas
 
@@ -235,7 +242,7 @@ def iniciar_env(caminho: Path = db.ENV_FILE) -> bool:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("comando", choices=("init-env", "migrate", "provision", "check", "status"))
-    ap.add_argument("--reexecutar", action="store_true", help="migrate: roda todos os scripts de novo")
+    ap.add_argument("--reexecutar", action="store_true", help="migrate: roda de novo as migrations reexecutáveis")
     a = ap.parse_args(argv)
     if a.comando == "init-env":
         print("criado .env.local (senhas geradas; não exibidas)" if iniciar_env() else ".env.local já existe; nada alterado")
